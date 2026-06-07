@@ -1,0 +1,7 @@
+{
+  "rewrites": [{ "source": "/((?!api/).*)", "destination": "/index.html" }],
+  "env": {
+    "BOT_TOKEN": "@bot_token",
+    "APP_URL": "@app_url"
+  }
+}
