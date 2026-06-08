@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useReducer, createContext, useContext } from "react";
+import { useState, useRef, useEffect, useCallback, useReducer, createContext, useContext, useMemo } from "react";
 import { AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, LineChart, Line } from "recharts";
 import { Voice } from "./voice.js";
 import { TG } from "./tg.js";
@@ -43,89 +43,104 @@ const monthName = ["Янв","Фев","Мар","Апр","Май","Июн","Июл
    КАТЕГОРИИ
 ═══════════════════════════════════════════════════════════ */
 const CATS = [
-  { k:"еда|продукт|магазин|кафе|ресторан|обед|пицца|доставк|суши|кофе|завтрак|ужин", n:"Еда",         e:"🛒", c:"#22C55E" },
-  { k:"такси|транспорт|автобус|метро|бензин|парковк|маршрутк|uber|болт",              n:"Транспорт",   e:"🚕", c:"#38BDE8" },
-  { k:"кино|развлечен|игр|концерт|театр|стриминг|подписк|клуб|netflix|spotify",       n:"Развлечения", e:"🎬", c:"#A78BFA" },
-  { k:"квартир|аренда|жкх|коммунал|свет|газ|интернет|связь|miete|rent",               n:"ЖКХ",         e:"🏠", c:"#FB923C" },
-  { k:"аптек|лекарств|врач|здоровь|фитнес|спортзал|стоматолог",                       n:"Здоровье",    e:"💊", c:"#EF4444" },
-  { k:"одежда|обувь|рубашк|брюки|куртк",                                              n:"Одежда",      e:"👗", c:"#EC4899" },
-  { k:"телефон|ноутбук|техника|гаджет|электроник",                                    n:"Техника",     e:"📱", c:"#06B6D4" },
-  { k:"зарплата|аванс|оклад|gehalt|salary",                                           n:"Зарплата",    e:"💼", c:"#10B981" },
-  { k:"фриланс|проект|заказ|клиент|подработк",                                        n:"Фриланс",     e:"💻", c:"#8B5CF6" },
+  { k:"еда|продукт|магазин|кафе|ресторан|обед|пицца|доставк|суши|кофе|завтрак|ужин|lebensmittel|supermarkt|edeka|lidl|aldi|rewe|netto|kaufland|penny|bäcker|metzger|essen|trinken|restaurant|café|kantine|brot|milch",
+    n:"Еда", e:"🛒", c:"#22C55E" },
+  { k:"такси|транспорт|автобус|метро|бензин|парковк|маршрутк|uber|bolt|taxi|bus|bahn|s-bahn|u-bahn|db|tankstelle|benzin|parkhaus|parken|fahrschein|ticket|mvv|hvv|rnv",
+    n:"Транспорт", e:"🚕", c:"#38BDE8" },
+  { k:"кино|развлечен|игр|концерт|театр|стриминг|подписк|клуб|netflix|spotify|kino|theater|konzert|museum|freizeitpark|spielhalle|abonnement|abo",
+    n:"Развлечения", e:"🎬", c:"#A78BFA" },
+  { k:"квартир|аренда|жкх|коммунал|свет|газ|интернет|связь|miete|nebenkosten|strom|wasser|heizung|internet|telefon|handyvertrag|wohnung",
+    n:"ЖКХ", e:"🏠", c:"#FB923C" },
+  { k:"аптек|лекарств|врач|здоровь|фитнес|спортзал|стоматолог|apotheke|arzt|krankenhaus|zahnarzt|medikament|fitnessstudio|sport|gym|krankenkasse",
+    n:"Здоровье", e:"💊", c:"#EF4444" },
+  { k:"одежда|обувь|рубашк|брюки|куртк|kleidung|schuhe|jacke|hose|hemd|zara|h&m|primark|c&a|mode",
+    n:"Одежда", e:"👗", c:"#EC4899" },
+  { k:"телефон|ноутбук|техника|гаджет|электроник|handy|laptop|computer|tablet|elektronik|saturn|mediamarkt|technik",
+    n:"Техника", e:"📱", c:"#06B6D4" },
+  { k:"зарплата|аванс|оклад|gehalt|lohn|salary|monatslohn|überweisung gehalt",
+    n:"Зарплата", e:"💼", c:"#10B981" },
+  { k:"фриланс|проект|заказ|клиент|подработк|freelance|honorar|rechnung|auftrag|nebenjob",
+    n:"Фриланс", e:"💻", c:"#8B5CF6" },
 ];
 const ALL_CATS = ["Еда","Транспорт","Развлечения","ЖКХ","Здоровье","Одежда","Техника","Зарплата","Фриланс","Другое"];
 const CAT_ICON = {"Еда":"🛒","Транспорт":"🚕","Развлечения":"🎬","ЖКХ":"🏠","Здоровье":"💊","Одежда":"👗","Техника":"📱","Зарплата":"💼","Фриланс":"💻","Другое":"📦"};
 const CAT_COLOR = {"Еда":"#22C55E","Транспорт":"#38BDE8","Развлечения":"#A78BFA","ЖКХ":"#FB923C","Здоровье":"#EF4444","Одежда":"#EC4899","Техника":"#06B6D4","Зарплата":"#10B981","Фриланс":"#8B5CF6","Другое":"#94A3B8"};
 function getCat(t){ const s=t.toLowerCase(); for(const c of CATS) if(new RegExp(c.k).test(s)) return c; return {n:"Другое",e:"📦",c:"#94A3B8"}; }
 function getAmt(raw){
+  if(!raw) return null;
   const t = raw.toLowerCase()
-    .replace(/евро|euros?|eur|€/gi, "")   // убираем обозначения валюты
-    .replace(/рублей|руб|₽/gi, "")
+    .replace(/евро|euros?|eur|€/gi," ")
+    .replace(/рублей|руб|₽/gi," ")
     .trim();
 
-  /* ── 1. Словесные числа ─────────────────────────────────── */
-  const words = {
-    "один":1,"одна":1,"два":2,"две":2,"три":3,"четыре":4,"пять":5,
-    "шесть":6,"семь":7,"восемь":8,"девять":9,"десять":10,
-    "одиннадцать":11,"двенадцать":12,"тринадцать":13,"четырнадцать":14,
-    "пятнадцать":15,"шестнадцать":16,"семнадцать":17,"восемнадцать":18,"девятнадцать":19,
+  /* ── 1. Явное указание центов: «153 евро 20 центов» ──────── */
+  const mCents = t.match(/(\d[\d\s.,]*)\s*(?:целых|запятая|komma|und)?\s*(\d{1,2})\s*(?:цент|коп|cent|pf)/i);
+  if(mCents){
+    const main=parseFloat(mCents[1].replace(/\s/g,"").replace(",","."));
+    const cents=parseInt(mCents[2]);
+    if(!isNaN(main)&&!isNaN(cents)) return Math.round((main+cents/100)*100)/100;
+  }
+
+  /* ── 2. Словесные числа RU + DE ─────────────────────────── */
+  const W={
+    "ноль":0,"нуль":0,"один":1,"одна":1,"два":2,"две":2,"три":3,"четыре":4,"пять":5,
+    "шесть":6,"семь":7,"восемь":8,"девять":9,"десять":10,"одиннадцать":11,
+    "двенадцать":12,"тринадцать":13,"четырнадцать":14,"пятнадцать":15,
+    "шестнадцать":16,"семнадцать":17,"восемнадцать":18,"девятнадцать":19,
     "двадцать":20,"тридцать":30,"сорок":40,"пятьдесят":50,
     "шестьдесят":60,"семьдесят":70,"восемьдесят":80,"девяносто":90,
     "сто":100,"двести":200,"триста":300,"четыреста":400,
     "пятьсот":500,"шестьсот":600,"семьсот":700,"восемьсот":800,"девятьсот":900,
     "тысяча":1000,"тысячи":1000,"тысяч":1000,
+    "null":0,"ein":1,"eine":1,"zwei":2,"drei":3,"vier":4,"fünf":5,
+    "sechs":6,"sieben":7,"acht":8,"neun":9,"zehn":10,"elf":11,"zwölf":12,
+    "dreizehn":13,"vierzehn":14,"fünfzehn":15,"sechzehn":16,"siebzehn":17,
+    "achtzehn":18,"neunzehn":19,"zwanzig":20,"dreißig":30,"vierzig":40,
+    "fünfzig":50,"sechzig":60,"siebzig":70,"achtzig":80,"neunzig":90,
+    "hundert":100,"zweihundert":200,"dreihundert":300,"vierhundert":400,
+    "fünfhundert":500,"sechshundert":600,"siebenhundert":700,
+    "neunhundert":900,"tausend":1000,"zweitausend":2000,"dreitausend":3000,
   };
-  let wordTotal = 0, wordFound = false;
-  // "тысяча семьсот" → 1700, "две тысячи пятьсот" → 2500
-  const parts = t.split(/\s+/);
-  let cur = 0, total = 0;
-  for(const p of parts){
-    if(words[p] !== undefined){
-      wordFound = true;
-      const v = words[p];
-      if(v === 1000){ total += (cur || 1) * 1000; cur = 0; }
-      else if(v >= 100){ cur += v; }
-      else { cur += v; }
+  let wT=0,wC=0,wF=false;
+  for(const p of t.split(/[\s,]+/)){
+    if(W[p]!==undefined){
+      wF=true; const v=W[p];
+      if(v===1000){wT+=(wC||1)*1000;wC=0;}
+      else if(v>=100){wC+=v;} else{wC+=v;}
     }
   }
-  if(wordFound){ wordTotal = total + cur; if(wordTotal > 0) return wordTotal; }
+  if(wF&&(wT+wC)>0) return wT+wC;
 
-  /* ── 2. Цифровые числа — умный парсер ───────────────────── */
-  // Убираем всё кроме цифр, пробелов, точек, запятых
-  const clean = t.replace(/[^\d\s.,]/g, " ").trim();
+  /* ── 3. Цифры — правильный порядок важен ────────────────── */
+  const cl = t.replace(/[^\d.,\s]/g," ").replace(/\s+/g," ").trim();
 
-  // Ищем число: возможно с разделителями тысяч и дробной частью
-  const numRe = /(\d{1,3}(?:[.\s]\d{3})+(?:[,]\d{1,2})?|\d+[,]\d{1,2}|\d+[.]\d{1,2}|\d+)/g;
-  const matches = [...clean.matchAll(numRe)];
-  if(!matches.length) return null;
+  // A. Евро формат с центами: 1.234,56 или 1.700,50
+  let m = cl.match(/(\d{1,3}(?:\.\d{3})+),(\d{2})/);
+  if(m) return parseFloat(m[1].replace(/\./g,"")+"."+m[2]);
 
-  // Берём первое совпадение
-  let numStr = matches[0][0].replace(/\s/g, "");
+  // B. Запятая = десятичный: 153,20 ← ГЛАВНЫЙ СЛУЧАЙ
+  m = cl.match(/\b(\d+),(\d{1,2})\b/);
+  if(m){ const n=parseFloat(m[1]+"."+m[2]); if(n>0) return n; }
 
-  let n;
-  if(/^\d{1,3}([.]\d{3})+([,]\d{1,2})?$/.test(numStr)){
-    // Европейский формат: 1.700 или 1.700,50
-    n = parseFloat(numStr.replace(/\./g,"").replace(",","."));
-  } else if(/^\d+[,]\d{1,2}$/.test(numStr)){
-    // Десятичная запятая: 45,50
-    n = parseFloat(numStr.replace(",","."));
-  } else if(/^\d+[.]\d{3}$/.test(numStr)){
-    // Точка как разделитель тысяч: 1.700
-    n = parseFloat(numStr.replace(".",""));
-  } else {
-    // Обычное число: 1700 или 1700.50
-    n = parseFloat(numStr);
+  // C. Точка = десятичный (1-2 знака): 153.20 но НЕ 1.700
+  m = cl.match(/\b(\d+)\.(\d{1,2})\b/);
+  if(m&&m[2].length<=2&&!/^\d{3}$/.test(m[2])){
+    const n=parseFloat(m[1]+"."+m[2]); if(n>0) return n;
   }
 
-  if(isNaN(n) || n <= 0) return null;
+  // D. Точка = тысячи: 1.700 → 1700
+  m = cl.match(/\b(\d{1,3})\.(\d{3})\b/);
+  if(m) return parseFloat(m[1]+m[2]);
 
-  /* ── 3. Множители ───────────────────────────────────────── */
-  if(/тысяч|тыс\b|\bк\b|k\b/i.test(raw) && n < 1000) n *= 1000;
-  if(/миллион/i.test(raw) && n < 1000000) n *= 1000000;
-  if(/полтора/i.test(raw)) n = 1.5 * (n || 1000);
-  if(/полтин|пятьдесят|50/i.test(raw) && /тысяч/i.test(raw)) n = 50000;
+  // E. Два числа: «153 20» → 153.20 (второе ≤ 99)
+  m = cl.match(/\b(\d{2,}) +(\d{1,2})\b/);
+  if(m){ const a=parseInt(m[1]),b=parseInt(m[2]); if(b<=99&&a>b) return parseFloat(a+"."+String(b).padStart(2,"0")); }
 
-  return n;
+  // F. Просто число
+  m = cl.match(/\b(\d+)\b/);
+  if(m){ let n=parseFloat(m[1]); if(/тысяч|тыс\b/i.test(raw)&&n<1000)n*=1000; if(n>0)return n; }
+
+  return null;
 }
 
 /* ─── Вычищаем число и ключевые слова из описания ─────────── */
@@ -144,8 +159,8 @@ function cleanDesc(raw, extraWords = []){
 ═══════════════════════════════════════════════════════════ */
 function nlp(raw){
   const t=raw.toLowerCase();
-  const EXP=/потратил[а]?|купил[а]?|заплатил[а]?|оплатил[а]?|списал[и]?|расход\b|трата\b|снял[а]?\b|израсход/;
-  const INC=/получил[а]?|заработал[а]?|зарплата\b|пришло\b|поступил|перевод\b|фриланс\b|доход\b|начислил|выплатил/;
+  const EXP=/потратил[а]?|купил[а]?|заплатил[а]?|оплатил[а]?|списал[и]?|расход\b|трата\b|снял[а]?\b|израсход|ausgegeben|gekauft|bezahlt|ausgabe|kosten\b|ich habe.*gekauft|ich habe.*bezahlt/;
+  const INC=/получил[а]?|заработал[а]?|зарплата\b|пришло\b|поступил|перевод\b|фриланс\b|доход\b|начислил|выплатил|erhalten|bekommen|verdient|einnahme|gehalt\b|lohn\b/;
 
   // Служебные команды — проверяем первыми
   if(/удали.*(последн|запис)|отмени.*(последн|запис)|убери последн/.test(t)) return {i:"DEL_LAST"};
@@ -175,6 +190,28 @@ function nlp(raw){
     return {i:"INC",amt,cat,desc:desc.slice(0,35)};
   }
 
+  // Без глагола: «зарплата 1800», «Gehalt 2500», «аванс 500»
+  // → категория дохода + число = доход
+  const incCatRe=/зарплата|аванс|оклад|gehalt|lohn|salary|фриланс|freelance|honorar/i;
+  if(incCatRe.test(t)){
+    const amt=getAmt(raw); const cat=getCat(t);
+    if(amt) return {i:"INC",amt,cat,desc:cat.n};
+  }
+
+  // Без глагола: «такси 18», «Lidl 45,20», «кафе 12,50»
+  // → категория расхода + число = расход
+  const expCatRe=getCat(t);
+  if(expCatRe.n!=="Другое"){
+    const amt=getAmt(raw);
+    if(amt) return {i:"EXP",amt,cat:expCatRe,desc:cleanDesc(raw)||expCatRe.n};
+  }
+
+  // Пользователь отвечает на переспрос: «получил» / «расход» / «доход»
+  if(/^(получил[а]?|доход|income|einnahme)[\s!.]*$/i.test(t.trim()))
+    return {i:"CONFIRM_INC"};
+  if(/^(потратил[а]?|расход|ausgabe|expense|потратил)[\s!.]*$/i.test(t.trim()))
+    return {i:"CONFIRM_EXP"};
+
   // Есть число но нет ключевых слов — просим уточнить
   const amt=getAmt(raw);
   if(amt) return {i:"CLARIFY",amt,raw};
@@ -186,6 +223,14 @@ function run(intent,txs,budgets,goals){
   const exp=txs.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amt,0);
   const mExp=txs.filter(t=>t.type==="expense"&&monthKey(t.date)===monthKey()).reduce((s,t)=>s+t.amt,0);
   switch(intent.i){
+    case"CONFIRM_INC":
+      if(!intent.pendingAmt) return {text:"Укажите сумму. Например: «Получил зарплату 1800»"};
+      return {text:`✅ Доход: **+${fmt2(intent.pendingAmt)}** ${intent.pendingCat?.e||"💼"} ${intent.pendingDesc||"Доход"}`,
+        addTx:{type:"income",amt:intent.pendingAmt,cat:intent.pendingCat?.n||"Другое",icon:intent.pendingCat?.e||"💼",desc:intent.pendingDesc||"Доход",src:"text"}};
+    case"CONFIRM_EXP":
+      if(!intent.pendingAmt) return {text:"Укажите сумму. Например: «Потратил 45 на еду»"};
+      return {text:`✅ Записал: **−${fmt2(intent.pendingAmt)}** ${intent.pendingCat?.e||"📦"} ${intent.pendingDesc||"Расход"}`,
+        addTx:{type:"expense",amt:intent.pendingAmt,cat:intent.pendingCat?.n||"Другое",icon:intent.pendingCat?.e||"📦",desc:intent.pendingDesc||"Расход",src:"text"}};
     case"EXP": return intent.amt
       ?{text:`✅ Записал: **−${fmt2(intent.amt)}** ${intent.cat.e} ${intent.desc}`,addTx:{type:"expense",amt:intent.amt,cat:intent.cat.n,icon:intent.cat.e,desc:intent.desc,src:"text"}}
       :{text:"Не расслышал сумму 🤔\nПример: «Потратил 45 на еду»"};
@@ -242,7 +287,7 @@ function run(intent,txs,budgets,goals){
     }
     case"HELP": return{text:`👋 Что я умею:\n\n🎤 Голос: «Потратил 45 на еду»\n⌨️ Текст любой командой\n📷 Фото чека — распознаю сумму\n📊 CSV выписка — импортирую\n\n✏️ Исправить ошибку:\n«Удали последнюю»\n«Исправь последнюю: потратил 25 в Пени»\nили в Истории кнопка «изменить»\n\n❓ Спросите:\n«Какой баланс?»\n«Прогноз на месяц»\n«Совет по экономии»`};
     default:
-      if(intent.i==="CLARIFY") return {text:`Вижу сумму **${fmt2(intent.amt)}** — это расход или доход?\n\nСкажите точнее:\n«Потратил ${fmt2(intent.amt)} на...»\n«Получил ${fmt2(intent.amt)}»`};
+      if(intent.i==="CLARIFY") return {text:`Вижу сумму **${fmt2(intent.amt)}** 🤔\n\nЭто расход или доход?\nНапишите одно слово:\n• «получил» → запишу как доход\n• «потратил» → запишу как расход`};
       return{text:`Не понял 🤔 Попробуйте:\n«Потратил 20 на кофе»\n«Получил зарплату 1700»\n«Какой баланс?»\n«Прогноз на месяц»`};
   }
 }
@@ -610,182 +655,300 @@ function Dashboard({state,goto}){
 ═══════════════════════════════════════════════════════════ */
 function Analytics({state}){
   const C=useC(); const {txs}=state;
-  const [period,setPeriod]=useState("month"); // week | month | year
+  const [period,setPeriod]=useState("month");
+  const [offset,setOffset]=useState(0); // 0=текущий, -1=предыдущий и т.д.
   const now=new Date();
-  const startOfDay=d=>{const x=new Date(d);x.setHours(0,0,0,0);return x;};
 
-  // начало текущего периода
-  const periodStart=(()=>{
+  /* ── Вычисляем границы выбранного периода ─────────────────── */
+  const {pStart,pEnd,pLabel,prevStart,prevEnd}=useMemo(()=>{
     const d=new Date();
-    if(period==="week") d.setDate(d.getDate()-6);
-    else if(period==="month") d.setDate(1);
-    else d.setMonth(0,1); // year
-    return startOfDay(d);
-  })();
-  // сколько дней уже прошло в текущем периоде (для честного сравнения)
-  const daysElapsed=Math.max(1,Math.floor((startOfDay(now)-periodStart)/864e5)+1);
+    let ps,pe,prevS,prevE,label;
 
-  // прошлый период — РОВНО такое же окно по длине, сразу перед текущим
-  const prevWindowStart=(()=>{
-    const d=new Date(periodStart);
-    if(period==="week") d.setDate(d.getDate()-7);
-    else if(period==="month") d.setMonth(d.getMonth()-1);
-    else d.setFullYear(d.getFullYear()-1);
-    return startOfDay(d);
-  })();
-  // конец окна сравнения = столько же дней, сколько прошло в текущем
-  const prevWindowEnd=(()=>{
-    const d=new Date(prevWindowStart);
-    d.setDate(d.getDate()+daysElapsed);
-    return startOfDay(d);
-  })();
+    if(period==="week"){
+      // Начало недели (пн) + offset недель
+      const day=d.getDay()||7; // 1=пн..7=вс
+      d.setDate(d.getDate()-day+1+offset*7);
+      d.setHours(0,0,0,0);
+      ps=new Date(d);
+      pe=new Date(d); pe.setDate(pe.getDate()+7);
+      prevS=new Date(d); prevS.setDate(prevS.getDate()-7);
+      prevE=new Date(ps);
+      const endD=new Date(pe); endD.setDate(endD.getDate()-1);
+      label=`${ps.getDate()} ${monthName[ps.getMonth()]} — ${endD.getDate()} ${monthName[endD.getMonth()]}`;
+    } else if(period==="month"){
+      // Месяц + offset месяцев
+      const base=new Date(now.getFullYear(),now.getMonth()+offset,1);
+      ps=base;
+      pe=new Date(base.getFullYear(),base.getMonth()+1,1);
+      prevS=new Date(base.getFullYear(),base.getMonth()-1,1);
+      prevE=new Date(base);
+      label=`${monthName[base.getMonth()]} ${base.getFullYear()}`;
+    } else {
+      // Год + offset лет
+      const y=now.getFullYear()+offset;
+      ps=new Date(y,0,1);
+      pe=new Date(y+1,0,1);
+      prevS=new Date(y-1,0,1);
+      prevE=new Date(y,0,1);
+      label=`${y} год`;
+    }
+    return {pStart:ps,pEnd:pe,pLabel:label,prevStart:prevS,prevEnd:prevE};
+  },[period,offset,now.getTime()]);
 
-  const inRange=(t,start,end)=>{const td=startOfDay(t.date);return td>=start&&td<end;};
-  const curEnd=new Date(startOfDay(now).getTime()+864e5); // включая сегодня
-  const cur=txs.filter(t=>inRange(t,periodStart,curEnd));
-  const prev=txs.filter(t=>inRange(t,prevWindowStart,prevWindowEnd));
+  const isCurrentPeriod=offset===0;
+
+  /* ── Фильтрация транзакций ──────────────────────────────────── */
+  const inRange=(t,s,e)=>{const d=new Date(t.date);return d>=s&&d<e;};
+  const cur=txs.filter(t=>inRange(t,pStart,pEnd));
+  const prev=txs.filter(t=>inRange(t,prevStart,prevEnd));
 
   const curExp=cur.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amt,0);
   const prevExp=prev.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amt,0);
   const curInc=cur.filter(t=>t.type==="income").reduce((s,t)=>s+t.amt,0);
   const prevInc=prev.filter(t=>t.type==="income").reduce((s,t)=>s+t.amt,0);
-  const diffExp=prevExp>0?Math.round((curExp-prevExp)/prevExp*100):(curExp>0?100:0);
-  const diffInc=prevInc>0?Math.round((curInc-prevInc)/prevInc*100):(curInc>0?100:0);
-  const avgDay=curExp/daysElapsed;
+  const diffExp=prevExp>0?Math.round((curExp-prevExp)/prevExp*100):null;
+  const diffInc=prevInc>0?Math.round((curInc-prevInc)/prevInc*100):null;
+  const days=Math.max(1,Math.ceil((Math.min(now,pEnd)-pStart)/864e5));
+  const avgDay=curExp/days;
 
-  // pie / bar — категории расходов текущего периода
+  /* ── Данные для графиков ────────────────────────────────────── */
+  const lineData=useMemo(()=>{
+    if(period==="week"){
+      const out=[];
+      for(let i=0;i<7;i++){
+        const d=new Date(pStart); d.setDate(d.getDate()+i);
+        if(d>now)break;
+        const ds=d.toISOString().slice(0,10);
+        out.push({x:dayName[d.getDay()||6],
+          e:txs.filter(t=>t.type==="expense"&&t.date===ds).reduce((s,t)=>s+t.amt,0),
+          i:txs.filter(t=>t.type==="income" &&t.date===ds).reduce((s,t)=>s+t.amt,0)});
+      }
+      return out;
+    } else if(period==="month"){
+      const out=[]; const daysInMonth=new Date(pStart.getFullYear(),pStart.getMonth()+1,0).getDate();
+      for(let d=1;d<=daysInMonth;d++){
+        const date=new Date(pStart.getFullYear(),pStart.getMonth(),d);
+        if(date>now)break;
+        const ds=date.toISOString().slice(0,10);
+        out.push({x:""+d,
+          e:txs.filter(t=>t.type==="expense"&&t.date===ds).reduce((s,t)=>s+t.amt,0),
+          i:txs.filter(t=>t.type==="income" &&t.date===ds).reduce((s,t)=>s+t.amt,0)});
+      }
+      return out;
+    } else {
+      // Год — по месяцам
+      const out=[];
+      for(let m=0;m<12;m++){
+        const mDate=new Date(pStart.getFullYear(),m,1);
+        if(mDate>now)break;
+        const mk=mDate.toISOString().slice(0,7);
+        const e=txs.filter(t=>t.type==="expense"&&monthKey(t.date)===mk).reduce((s,t)=>s+t.amt,0);
+        const i=txs.filter(t=>t.type==="income" &&monthKey(t.date)===mk).reduce((s,t)=>s+t.amt,0);
+        out.push({x:monthName[m],e,i});
+      }
+      return out;
+    }
+  },[period,pStart.getTime(),txs.length]);
+
+  /* ── По категориям ──────────────────────────────────────────── */
   const byCat=cur.filter(t=>t.type==="expense").reduce((a,t)=>({...a,[t.cat]:(a[t.cat]||0)+t.amt}),{});
   const pie=Object.entries(byCat).map(([n,v])=>({n,v,color:CAT_COLOR[n]||"#888"})).sort((a,b)=>b.v-a.v);
-  const bar=pie.slice(0,6);
 
-  // линия динамики из реальных транзакций
-  const lineData=(()=>{
-    const out=[];
-    if(period==="week"){
-      for(let i=6;i>=0;i--){const d=new Date();d.setDate(d.getDate()-i);const ds=d.toISOString().slice(0,10);
-        out.push({x:dayName[d.getDay()],e:txs.filter(t=>t.type==="expense"&&t.date===ds).reduce((s,t)=>s+t.amt,0)});}
-    } else if(period==="month"){
-      const days=now.getDate();
-      for(let i=1;i<=days;i++){const ds=new Date(now.getFullYear(),now.getMonth(),i).toISOString().slice(0,10);
-        out.push({x:""+i,e:txs.filter(t=>t.type==="expense"&&t.date===ds).reduce((s,t)=>s+t.amt,0)});}
-    } else { // year — 12 месяцев
-      for(let m=0;m<=now.getMonth();m++){const mk=new Date(now.getFullYear(),m,1).toISOString().slice(0,7);
-        out.push({x:monthName[m],e:txs.filter(t=>t.type==="expense"&&monthKey(t.date)===mk).reduce((s,t)=>s+t.amt,0)});}
-    }
-    return out;
-  })();
+  /* ── Помесячная таблица (только для года) ───────────────────── */
+  const monthRows=period==="year"?lineData.map((m,i)=>({
+    label:m.x, exp:m.e, inc:m.i, bal:m.i-m.e
+  })):[];
+  const maxMonthExp=Math.max(1,...monthRows.map(r=>r.exp));
+
+  const Badge=({diff,inv})=>{
+    if(diff===null) return null;
+    const bad=(inv?diff<0:diff>0);
+    return <span style={{fontSize:11,fontWeight:700,padding:"2px 7px",borderRadius:20,background:(bad?C.red:C.green)+"1A",color:bad?C.red:C.green}}>
+      {diff>0?"▲":"▼"} {Math.abs(diff)}%
+    </span>;
+  };
 
   const PERIODS=[["week","Неделя"],["month","Месяц"],["year","Год"]];
-  const periodLabel={week:"за 7 дней",month:"в этом месяце",year:"в этом году"}[period];
-  const prevLabel={week:"к прошлой неделе",month:"к прошлому месяцу",year:"к прошлому году"}[period];
-
-  const CompBadge=({diff})=>(
-    <span style={{display:"inline-flex",alignItems:"center",gap:3,fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:20,
-      background:(diff>0?C.red:C.green)+"1A",color:diff>0?C.red:C.green}}>
-      {diff>0?"▲":"▼"} {Math.abs(diff)}%
-    </span>
-  );
 
   return(
     <div style={{padding:"0 16px 90px"}}>
+      {/* Заголовок */}
       <div style={{padding:"14px 0 12px"}}>
         <div style={{color:C.sub,fontSize:11,letterSpacing:2,textTransform:"uppercase"}}>Статистика</div>
         <div style={{color:C.text,fontSize:22,fontWeight:800,marginTop:2}}>Аналитика</div>
       </div>
-      {/* периоды */}
-      <div style={{display:"flex",gap:6,marginBottom:14}}>
+
+      {/* Тип периода */}
+      <div style={{display:"flex",gap:6,marginBottom:12}}>
         {PERIODS.map(([v,l])=>(
-          <button key={v} onClick={()=>setPeriod(v)} style={{flex:1,padding:"10px",borderRadius:10,border:"none",background:period===v?C.gold:C.card,color:period===v?"#0A0D14":C.sub,fontSize:13,fontWeight:700,cursor:"pointer"}}>{l}</button>
+          <button key={v} onClick={()=>{setPeriod(v);setOffset(0);}}
+            style={{flex:1,padding:"10px",borderRadius:10,border:"none",
+              background:period===v?C.gold:C.card,
+              color:period===v?"#0A0D14":C.sub,
+              fontSize:13,fontWeight:700,cursor:"pointer"}}>
+            {l}
+          </button>
         ))}
       </div>
-      {/* сводка с честным сравнением */}
+
+      {/* Навигация по периодам */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",
+        background:C.card,borderRadius:14,padding:"10px 14px",marginBottom:14,
+        border:`1px solid ${C.border}`}}>
+        <button onClick={()=>setOffset(o=>o-1)}
+          style={{background:"none",border:"none",color:C.gold,fontSize:22,cursor:"pointer",padding:"0 8px"}}>‹</button>
+        <div style={{textAlign:"center"}}>
+          <div style={{color:C.text,fontSize:15,fontWeight:700}}>{pLabel}</div>
+          {isCurrentPeriod&&<div style={{color:C.green,fontSize:10,marginTop:2}}>● текущий период</div>}
+        </div>
+        <button onClick={()=>setOffset(o=>Math.min(0,o+1))}
+          style={{background:"none",border:"none",
+            color:offset<0?C.gold:C.muted,
+            fontSize:22,cursor:offset<0?"pointer":"default",padding:"0 8px"}}>›</button>
+      </div>
+
+      {/* Сводка */}
       <div style={{display:"flex",gap:10,marginBottom:14}}>
         <Card style={{flex:1,padding:14}}>
-          <div style={{color:C.sub,fontSize:10,textTransform:"uppercase",letterSpacing:1}}>Расходы {periodLabel}</div>
+          <div style={{color:C.sub,fontSize:10,textTransform:"uppercase",letterSpacing:1}}>Расходы</div>
           <div style={{color:C.red,fontSize:20,fontWeight:800,marginTop:3}}>{fmt(curExp)}</div>
           <div style={{display:"flex",alignItems:"center",gap:6,marginTop:5}}>
-            <CompBadge diff={diffExp}/>
-            <span style={{color:C.muted,fontSize:10}}>{prevLabel}</span>
+            <Badge diff={diffExp}/>
+            {diffExp!==null&&<span style={{color:C.muted,fontSize:10}}>к пред.</span>}
           </div>
         </Card>
         <Card style={{flex:1,padding:14}}>
-          <div style={{color:C.sub,fontSize:10,textTransform:"uppercase",letterSpacing:1}}>Доходы {periodLabel}</div>
+          <div style={{color:C.sub,fontSize:10,textTransform:"uppercase",letterSpacing:1}}>Доходы</div>
           <div style={{color:C.green,fontSize:20,fontWeight:800,marginTop:3}}>{fmt(curInc)}</div>
           <div style={{display:"flex",alignItems:"center",gap:6,marginTop:5}}>
-            <CompBadge diff={-diffInc}/>
-            <span style={{color:C.muted,fontSize:10}}>{prevLabel}</span>
+            <Badge diff={diffInc} inv/>
+            {diffInc!==null&&<span style={{color:C.muted,fontSize:10}}>к пред.</span>}
           </div>
         </Card>
       </div>
-      {/* баланс + средний день */}
+
+      {/* Баланс + среднее */}
       <Card style={{marginBottom:14,padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <div>
-          <div style={{color:C.sub,fontSize:10,textTransform:"uppercase",letterSpacing:1}}>Баланс {periodLabel}</div>
-          <div style={{color:curInc-curExp>=0?C.green:C.red,fontSize:18,fontWeight:800,marginTop:2}}>{curInc-curExp>=0?"+":""}{fmt(curInc-curExp)}</div>
+          <div style={{color:C.sub,fontSize:10,textTransform:"uppercase",letterSpacing:1}}>Баланс периода</div>
+          <div style={{color:curInc-curExp>=0?C.green:C.red,fontSize:18,fontWeight:800,marginTop:2}}>
+            {curInc-curExp>=0?"+":""}{fmt(curInc-curExp)}
+          </div>
         </div>
-        <div style={{textAlign:"right"}}>
+        {period!=="year"&&<div style={{textAlign:"right"}}>
           <div style={{color:C.sub,fontSize:10,textTransform:"uppercase",letterSpacing:1}}>В среднем</div>
-          <div style={{color:C.text,fontSize:15,fontWeight:700,marginTop:2}}>{fmt(avgDay)} / день</div>
-        </div>
+          <div style={{color:C.text,fontSize:15,fontWeight:700,marginTop:2}}>{fmt(avgDay)}/день</div>
+        </div>}
       </Card>
-      {/* линия */}
-      <Card style={{marginBottom:14,padding:"14px 6px 8px"}}>
-        <div style={{paddingLeft:10}}><SectionTitle>{period==="week"?"Расходы по дням":period==="month"?"Расходы по дням месяца":"Расходы по месяцам"}</SectionTitle></div>
-        <ResponsiveContainer width="100%" height={150}>
-          <LineChart data={lineData} margin={{top:5,right:10,bottom:0,left:-20}}>
-            <XAxis dataKey="x" tick={{fill:C.muted,fontSize:9}} axisLine={false} tickLine={false}/>
-            <YAxis tick={{fill:C.muted,fontSize:9}} axisLine={false} tickLine={false}/>
-            <Tooltip contentStyle={{background:C.card2,border:`1px solid ${C.border}`,borderRadius:8,fontSize:11,color:C.text}} formatter={v=>fmt(v)}/>
-            <Line type="monotone" dataKey="e" stroke={C.gold} strokeWidth={2.5} dot={{r:3,fill:C.gold}} activeDot={{r:5}}/>
-          </LineChart>
-        </ResponsiveContainer>
-      </Card>
-      {/* pie */}
+
+      {/* ГОДОВОЙ ВИД — таблица по месяцам */}
+      {period==="year"&&monthRows.length>0&&(
+        <Card style={{marginBottom:14}}>
+          <SectionTitle>По месяцам — {pStart.getFullYear()}</SectionTitle>
+          {monthRows.map((r,i)=>(
+            <div key={i} style={{marginBottom:10}}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                <span style={{color:C.text,fontSize:13,fontWeight:600,width:36}}>{r.label}</span>
+                <span style={{color:C.red,fontSize:12,width:80,textAlign:"right"}}>{r.exp>0?`−${fmt(r.exp)}`:"—"}</span>
+                <span style={{color:r.bal>=0?C.green:C.red,fontSize:12,fontWeight:700,width:80,textAlign:"right"}}>
+                  {r.exp>0|r.inc>0?(r.bal>=0?"+":"")+fmt(r.bal):"—"}
+                </span>
+              </div>
+              {r.exp>0&&<div style={{background:C.card2,borderRadius:3,height:5,overflow:"hidden"}}>
+                <div style={{width:`${r.exp/maxMonthExp*100}%`,height:"100%",background:C.red,borderRadius:3}}/>
+              </div>}
+            </div>
+          ))}
+          {/* Итого год */}
+          <div style={{borderTop:`1px solid ${C.border}`,paddingTop:10,marginTop:4,display:"flex",justifyContent:"space-between"}}>
+            <span style={{color:C.sub,fontSize:12,fontWeight:700}}>Итого {pStart.getFullYear()}</span>
+            <span style={{color:C.red,fontSize:12}}>−{fmt(monthRows.reduce((s,r)=>s+r.exp,0))}</span>
+            <span style={{color:C.gold,fontSize:12,fontWeight:700}}>
+              {fmt(monthRows.reduce((s,r)=>s+r.bal,0))}
+            </span>
+          </div>
+        </Card>
+      )}
+
+      {/* График динамики */}
+      {lineData.length>0&&(
+        <Card style={{marginBottom:14,padding:"14px 6px 8px"}}>
+          <div style={{paddingLeft:10}}>
+            <SectionTitle>
+              {period==="week"?"По дням":period==="month"?"Дни месяца":"Расходы по месяцам"}
+            </SectionTitle>
+          </div>
+          <ResponsiveContainer width="100%" height={period==="year"?130:140}>
+            {period==="year"?(
+              <BarChart data={lineData} margin={{top:0,right:8,bottom:0,left:-22}}>
+                <XAxis dataKey="x" tick={{fill:C.muted,fontSize:9}} axisLine={false} tickLine={false}/>
+                <YAxis tick={{fill:C.muted,fontSize:9}} axisLine={false} tickLine={false}/>
+                <Tooltip contentStyle={{background:C.card2,border:`1px solid ${C.border}`,borderRadius:8,fontSize:11,color:C.text}} formatter={v=>fmt(v)}/>
+                <Bar dataKey="e" fill={C.red} radius={[3,3,0,0]}/>
+                <Bar dataKey="i" fill={C.green} radius={[3,3,0,0]}/>
+              </BarChart>
+            ):(
+              <AreaChart data={lineData} margin={{top:5,right:8,bottom:0,left:-22}}>
+                <defs>
+                  <linearGradient id="ae" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={C.red} stopOpacity={.4}/>
+                    <stop offset="100%" stopColor={C.red} stopOpacity={0}/>
+                  </linearGradient>
+                  <linearGradient id="ai" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={C.green} stopOpacity={.35}/>
+                    <stop offset="100%" stopColor={C.green} stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <XAxis dataKey="x" tick={{fill:C.muted,fontSize:9}} axisLine={false} tickLine={false}
+                  interval={period==="month"?4:0}/>
+                <YAxis tick={{fill:C.muted,fontSize:9}} axisLine={false} tickLine={false}/>
+                <Tooltip contentStyle={{background:C.card2,border:`1px solid ${C.border}`,borderRadius:8,fontSize:11,color:C.text}} formatter={v=>fmt(v)}/>
+                <Area type="monotone" dataKey="e" stroke={C.red}   strokeWidth={2} fill="url(#ae)"/>
+                <Area type="monotone" dataKey="i" stroke={C.green} strokeWidth={2} fill="url(#ai)"/>
+              </AreaChart>
+            )}
+          </ResponsiveContainer>
+          <div style={{display:"flex",gap:16,justifyContent:"center",marginTop:6}}>
+            <span style={{color:C.red,fontSize:11}}>━ Расходы</span>
+            <span style={{color:C.green,fontSize:11}}>━ Доходы</span>
+          </div>
+        </Card>
+      )}
+
+      {/* Категории */}
       {pie.length>0&&(
         <Card style={{marginBottom:14}}>
           <SectionTitle>По категориям</SectionTitle>
-          <div style={{display:"flex",gap:12,alignItems:"center"}}>
-            <ResponsiveContainer width={120} height={120}>
-              <PieChart><Pie data={pie} cx="50%" cy="50%" innerRadius={34} outerRadius={56} dataKey="v" strokeWidth={0}>
-                {pie.map((e,i)=><Cell key={i} fill={e.color}/>)}
+          <div style={{display:"flex",gap:10,alignItems:"center"}}>
+            <ResponsiveContainer width={110} height={110}>
+              <PieChart><Pie data={pie} cx="50%" cy="50%" innerRadius={30} outerRadius={52} dataKey="v" strokeWidth={0}>
+                {pie.map((_,i)=><Cell key={i} fill={_.color}/>)}
               </Pie></PieChart>
             </ResponsiveContainer>
             <div style={{flex:1}}>
               {pie.slice(0,6).map((e,i)=>(
                 <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-                  <div style={{display:"flex",alignItems:"center",gap:6}}>
+                  <div style={{display:"flex",alignItems:"center",gap:5}}>
                     <div style={{width:8,height:8,borderRadius:2,background:e.color}}/>
-                    <span style={{color:C.sub,fontSize:12}}>{e.n}</span>
+                    <span style={{color:C.sub,fontSize:11}}>{e.n}</span>
                   </div>
-                  <span style={{color:C.text,fontSize:12,fontWeight:600}}>{Math.round(e.v/curExp*100)}%</span>
+                  <span style={{color:C.text,fontSize:11,fontWeight:600}}>{curExp>0?Math.round(e.v/curExp*100):0}%</span>
                 </div>
               ))}
             </div>
           </div>
         </Card>
       )}
-      {/* bar */}
-      {bar.length>0&&(
-        <Card style={{padding:"14px 6px 8px"}}>
-          <div style={{paddingLeft:10}}><SectionTitle>Топ категорий</SectionTitle></div>
-          <ResponsiveContainer width="100%" height={Math.max(120,bar.length*32)}>
-            <BarChart data={bar} layout="vertical" margin={{top:0,right:14,bottom:0,left:40}}>
-              <XAxis type="number" tick={{fill:C.muted,fontSize:9}} axisLine={false} tickLine={false}/>
-              <YAxis type="category" dataKey="n" tick={{fill:C.sub,fontSize:11}} axisLine={false} tickLine={false} width={70}/>
-              <Tooltip contentStyle={{background:C.card2,border:`1px solid ${C.border}`,borderRadius:8,fontSize:11,color:C.text}} formatter={v=>fmt(v)}/>
-              <Bar dataKey="v" radius={[0,6,6,0]}>{bar.map((e,i)=><Cell key={i} fill={e.color}/>)}</Bar>
-            </BarChart>
-          </ResponsiveContainer>
+
+      {cur.length===0&&(
+        <Card style={{textAlign:"center",color:C.muted,padding:30}}>
+          Нет данных за этот период
         </Card>
       )}
-      {pie.length===0&&<Card style={{textAlign:"center",color:C.muted,padding:30}}>Нет данных за этот период</Card>}
     </div>
   );
 }
 
-/* ═══════════════════════════════════════════════════════════
-   БЮДЖЕТЫ
-═══════════════════════════════════════════════════════════ */
 function Budgets({state,dispatch}){
   const C=useC(); const {txs,budgets}=state;
   const [editing,setEditing]=useState(null);
@@ -930,6 +1093,7 @@ function Chat({state,dispatch}){
   const C=useC(); const {txs,budgets,goals}=state;
   const [msgs,setMsgs]=useState([{id:0,kind:"bot",text:"Привет! 👋 Я ваш офлайн финансовый ассистент.\n\nПринимаю **голос**, **текст**, **фото чеков** и **CSV выписки**. Всё сохраняется локально.\n\nСкажите «помоги» чтобы увидеть команды."}]);
   const [input,setInput]=useState(""),[busy,setBusy]=useState(false);
+  const lastClarify=useRef(null); // запоминаем последний переспрос {amt, cat, desc}
   const listRef=useRef(null);
   const down=()=>setTimeout(()=>listRef.current?.scrollTo({top:99999,behavior:"smooth"}),80);
 
@@ -937,7 +1101,31 @@ function Chat({state,dispatch}){
     if(!text.trim()||busy)return; setInput("");
     setMsgs(p=>[...p,{id:Date.now(),kind:"user",text:text.trim(),voice:isVoice}]); setBusy(true); down();
     setTimeout(()=>{
-      const res=run(nlp(text),txs,budgets,goals);
+      let intent=nlp(text);
+
+      // Если пользователь подтверждает тип после переспроса —
+      // добавляем сумму и категорию из контекста
+      if((intent.i==="CONFIRM_INC"||intent.i==="CONFIRM_EXP")&&lastClarify.current){
+        intent={...intent,
+          pendingAmt: lastClarify.current.amt,
+          pendingCat: lastClarify.current.cat,
+          pendingDesc:lastClarify.current.desc,
+        };
+        lastClarify.current=null; // сбрасываем контекст
+      }
+
+      // Если бот переспрашивает — запоминаем сумму
+      if(intent.i==="CLARIFY"){
+        lastClarify.current={
+          amt:  intent.amt,
+          cat:  getCat(text),
+          desc: cleanDesc(text)||"",
+        };
+      } else if(intent.i!=="CONFIRM_INC"&&intent.i!=="CONFIRM_EXP"){
+        lastClarify.current=null; // любой другой ответ — сбрасываем
+      }
+
+      const res=run(intent,txs,budgets,goals);
       if(res.addTx) dispatch({type:"ADD_TX",tx:res.addTx});
       if(res.delLast) dispatch({type:"DEL_TX",id:res.delLast});
       if(res.fixLast) dispatch({type:"EDIT_TX",id:res.fixLast.id,patch:res.fixLast.patch});
