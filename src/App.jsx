@@ -1130,7 +1130,12 @@ function Settings({state,dispatch}){
   const setS=patch=>dispatch({type:"SET_SETTINGS",patch});
   const toggle=(k)=>setS({[k]:!settings[k]});
   const savePin=()=>{ if(newPin.length>=4){setS({pin:newPin});setPinMode(false);setNewPin("");} };
-  const clearAll=()=>{ if(confirm("Удалить все данные? Это нельзя отменить.")){ Object.values(KEYS).forEach(k=>localStorage.removeItem(k)); location.reload(); } };
+  const clearAll=()=>{ if(confirm("Удалить все данные? Это нельзя отменить.")){
+  lsSet(KEYS.tx,[]); 
+  lsSet(KEYS.budgets,{}); 
+  lsSet(KEYS.goals,[]); 
+  location.reload(); 
+}};
   const backup=()=>{
     const data=JSON.stringify({txs:state.txs,budgets:state.budgets,goals:state.goals,settings:state.settings});
     const blob=new Blob([data],{type:"application/json"}); const a=document.createElement("a");
