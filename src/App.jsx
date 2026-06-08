@@ -662,47 +662,51 @@ function Dashboard({state,goto}){
 function Analytics({state}){
   const C=useC(); const {txs}=state;
   const [period,setPeriod]=useState("month");
-  const [offset,setOffset]=useState(0); // 0=текущий, -1=предыдущий и т.д.
-  const now=new Date();
+  const [offset,setOffset]=useState(0);
 
-  /* ── Вычисляем границы выбранного периода ─────────────────── */
+  // Стабильная дата — не пересоздаётся каждый рендер
+  const todayRef=useRef(new Date());
+  const now=todayRef.current;
+  const todayStr=now.toISOString().slice(0,10);
+
+  /* ── Границы периода — зависят только от period и offset ─── */
   const {pStart,pEnd,pLabel}=useMemo(()=>{
-    const d=new Date();
+    const ref=new Date(now); // копируем стабильный now
     let ps,pe,label;
 
     if(period==="week"){
-      // Неделя пн-вс + offset
-      const day=d.getDay()||7;
-      d.setDate(d.getDate()-day+1+offset*7);
-      d.setHours(0,0,0,0);
-      ps=new Date(d);
-      pe=new Date(d); pe.setDate(pe.getDate()+7);
+      const day=ref.getDay()||7;
+      ref.setDate(ref.getDate()-day+1+offset*7);
+      ref.setHours(0,0,0,0);
+      ps=new Date(ref);
+      pe=new Date(ref); pe.setDate(pe.getDate()+7);
       const endD=new Date(pe); endD.setDate(endD.getDate()-1);
       label=`${ps.getDate()} ${monthName[ps.getMonth()]} — ${endD.getDate()} ${monthName[endD.getMonth()]}`;
     } else if(period==="month"){
-      // Полный месяц с 1-го по последнее число
       const base=new Date(now.getFullYear(),now.getMonth()+offset,1);
       ps=base;
       pe=new Date(base.getFullYear(),base.getMonth()+1,1);
       label=`${monthName[base.getMonth()]} ${base.getFullYear()}`;
     } else {
-      // Полный год
       const y=now.getFullYear()+offset;
       ps=new Date(y,0,1);
       pe=new Date(y+1,0,1);
       label=`${y} год`;
     }
     return {pStart:ps,pEnd:pe,pLabel:label};
-  },[period,offset,now.getTime()]);
+  },[period,offset]); // ← только period и offset, не now.getTime()!
 
   const isCurrentPeriod=offset===0;
+  const isPastPeriod=pEnd<=now;
 
-  /* ── Фильтрация транзакций ──────────────────────────────────── */
+  /* ── Фильтрация ─────────────────────────────────────────────── */
   const inRange=(t,s,e)=>{const d=new Date(t.date);return d>=s&&d<e;};
   const cur=txs.filter(t=>inRange(t,pStart,pEnd));
   const curExp=cur.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amt,0);
   const curInc=cur.filter(t=>t.type==="income").reduce((s,t)=>s+t.amt,0);
-  const days=Math.max(1,Math.ceil((Math.min(now,pEnd)-pStart)/864e5));
+  // Для среднего: если период закончился — все дни, иначе до сегодня
+  const effectiveEnd=isPastPeriod?pEnd:new Date(now.getTime()+864e5);
+  const days=Math.max(1,Math.ceil((effectiveEnd-pStart)/864e5));
   const avgDay=curExp/days;
 
   /* ── Данные для графиков ────────────────────────────────────── */
@@ -711,38 +715,44 @@ function Analytics({state}){
       const out=[];
       for(let i=0;i<7;i++){
         const d=new Date(pStart); d.setDate(d.getDate()+i);
-        if(d>now)break;
         const ds=d.toISOString().slice(0,10);
-        out.push({x:dayName[d.getDay()||6],
-          e:txs.filter(t=>t.type==="expense"&&t.date===ds).reduce((s,t)=>s+t.amt,0),
-          i:txs.filter(t=>t.type==="income" &&t.date===ds).reduce((s,t)=>s+t.amt,0)});
+        if(ds>todayStr) break; // не показываем будущие дни
+        out.push({
+          x: dayName[d.getDay()]||dayName[0],
+          e: txs.filter(t=>t.type==="expense"&&t.date===ds).reduce((s,t)=>s+t.amt,0),
+          i: txs.filter(t=>t.type==="income" &&t.date===ds).reduce((s,t)=>s+t.amt,0),
+        });
       }
       return out;
+
     } else if(period==="month"){
-      const out=[]; const daysInMonth=new Date(pStart.getFullYear(),pStart.getMonth()+1,0).getDate();
+      const out=[];
+      const daysInMonth=new Date(pStart.getFullYear(),pStart.getMonth()+1,0).getDate();
       for(let d=1;d<=daysInMonth;d++){
-        const date=new Date(pStart.getFullYear(),pStart.getMonth(),d);
-        if(date>now)break;
-        const ds=date.toISOString().slice(0,10);
-        out.push({x:""+d,
-          e:txs.filter(t=>t.type==="expense"&&t.date===ds).reduce((s,t)=>s+t.amt,0),
-          i:txs.filter(t=>t.type==="income" &&t.date===ds).reduce((s,t)=>s+t.amt,0)});
+        const ds=new Date(pStart.getFullYear(),pStart.getMonth(),d).toISOString().slice(0,10);
+        if(ds>todayStr) break;
+        out.push({
+          x: ""+d,
+          e: txs.filter(t=>t.type==="expense"&&t.date===ds).reduce((s,t)=>s+t.amt,0),
+          i: txs.filter(t=>t.type==="income" &&t.date===ds).reduce((s,t)=>s+t.amt,0),
+        });
       }
       return out;
+
     } else {
-      // Год — по месяцам
+      // Год — все 12 месяцев, но не будущие
       const out=[];
       for(let m=0;m<12;m++){
-        const mDate=new Date(pStart.getFullYear(),m,1);
-        if(mDate>now)break;
-        const mk=mDate.toISOString().slice(0,7);
+        const mk=`${pStart.getFullYear()}-${String(m+1).padStart(2,"0")}`;
+        if(mk>todayStr.slice(0,7)) break; // не показываем будущие месяцы
         const e=txs.filter(t=>t.type==="expense"&&monthKey(t.date)===mk).reduce((s,t)=>s+t.amt,0);
         const i=txs.filter(t=>t.type==="income" &&monthKey(t.date)===mk).reduce((s,t)=>s+t.amt,0);
         out.push({x:monthName[m],e,i});
       }
       return out;
     }
-  },[period,pStart.getTime(),txs.length]);
+  // Зависим от строк, не от объектов Date — это стабильно
+  },[period,pStart.getFullYear(),pStart.getMonth(),pStart.getDate(),txs.length,todayStr]);
 
   /* ── По категориям ──────────────────────────────────────────── */
   const byCat=cur.filter(t=>t.type==="expense").reduce((a,t)=>({...a,[t.cat]:(a[t.cat]||0)+t.amt}),{});
