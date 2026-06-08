@@ -1,83 +1,49 @@
 /* ════════════════════════════════════════════════════════════
-   ГОЛОСОВОЙ ВВОД — версия без повторных запросов разрешения
+   ГОЛОСОВОЙ ВВОД — финальная версия для Telegram Mini App
 
-   Принцип:
-   - getUserMedia() вызывается ОДИН РАЗ за сессию
-   - Поток (stream) держится открытым → разрешение не сбрасывается
-   - SpeechRecognition видит уже выданное разрешение → не спрашивает
-   - Разрешение запрашивается заранее при инициализации голоса
+   КЛЮЧЕВОЕ РЕШЕНИЕ:
+   getUserMedia() полностью убран.
+   SpeechRecognition сам управляет микрофоном и разрешениями.
+   Это даёт ОДИН диалог разрешения за сессию, не два.
 ════════════════════════════════════════════════════════════ */
 
-let micStream   = null;   // MediaStream — держим открытым всю сессию
-let rec         = null;   // SpeechRecognition instance
-let silenceTimer= null;
-let lastText    = "";
-let isDone      = false;
+let rec          = null;
+let silenceTimer = null;
+let safetyTimer  = null;
+let lastText     = "";
+let isDone       = false;
 
-/* ── Запросить разрешение один раз ─────────────────────────
-   Вызывается при первом нажатии на 🎤.
-   После этого поток хранится в micStream — разрешение выдано.  */
-async function ensureMic() {
-  if (micStream && micStream.active) return true; // уже есть, не спрашиваем
-  try {
-    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    return true;
-  } catch (e) {
-    micStream = null;
-    return false;
-  }
-}
-
-/* ── Очистка SpeechRecognition (НЕ закрываем micStream!) ─── */
-function cleanupRec() {
+function cleanup() {
   if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
+  if (safetyTimer)  { clearTimeout(safetyTimer);  safetyTimer  = null; }
   try { rec?.abort(); } catch {}
   rec = null;
 }
 
-/* ── Финализация — отдать результат ────────────────────────  */
 function finish(text, onFinal) {
   if (isDone) return;
   isDone = true;
-  cleanupRec();
+  cleanup();
   onFinal(text?.trim() || "");
 }
 
 export const Voice = {
 
-  /* Проверить поддержку */
   async available() {
-    return !!(
-      window.SpeechRecognition || window.webkitSpeechRecognition
-    ) && !!navigator.mediaDevices?.getUserMedia;
+    return !!(window.SpeechRecognition || window.webkitSpeechRecognition);
   },
 
-  /* Предзагрузка разрешения — вызывать при инициализации приложения.
-     Показывает диалог один раз при старте, потом молчит. */
-  async prewarm() {
-    await ensureMic();
-  },
+  // Оставляем метод чтобы не сломать вызов в App.jsx — просто пустой
+  async prewarm() {},
 
-  /* Начать запись */
   async start(onPartial, onFinal, onError) {
-    cleanupRec();
-    isDone  = false;
+    cleanup();
+    isDone   = false;
     lastText = "";
 
-    /* 1. Получаем разрешение (или берём сохранённое) */
-    const ok = await ensureMic();
-    if (!ok) {
-      onError(
-        "🎤 Нет доступа к микрофону.\n" +
-        "Откройте Настройки телефона → Приложения → Telegram → Разрешения → Микрофон → Разрешить."
-      );
-      return false;
-    }
-
-    /* 2. Создаём распознавание — разрешение уже выдано, диалога не будет */
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) {
-      onError("Голосовой ввод не поддерживается в этом браузере.");
+      onError("Голосовой ввод недоступен в этом браузере.");
       return false;
     }
 
@@ -87,33 +53,51 @@ export const Voice = {
     rec.interimResults  = true;
     rec.maxAlternatives = 1;
 
+    rec.onstart = () => {
+      // Страховка: через 15 сек принудительно закрываем
+      safetyTimer = setTimeout(() => finish(lastText, onFinal), 15000);
+    };
+
     rec.onresult = (e) => {
-      const text = Array.from(e.results).map(r => r[0].transcript).join("");
+      const text = Array.from(e.results)
+        .map(r => r[0].transcript)
+        .join("");
+
       lastText = text;
       onPartial(text);
 
-      // сбрасываем таймер тишины
+      // Сброс таймера тишины при каждом новом слове
       if (silenceTimer) clearTimeout(silenceTimer);
       silenceTimer = setTimeout(() => finish(lastText, onFinal), 2000);
 
-      if (e.results[e.results.length - 1].isFinal) finish(text, onFinal);
+      if (e.results[e.results.length - 1].isFinal) {
+        finish(text, onFinal);
+      }
     };
 
     rec.onerror = (e) => {
-      cleanupRec(); isDone = true;
-      if (e.error === "not-allowed" || e.error === "permission-denied") {
-        // Сбрасываем сохранённый поток — придётся запросить снова
-        try { micStream?.getTracks().forEach(t => t.stop()); } catch {}
-        micStream = null;
-        onError("🎤 Доступ к микрофону запрещён.\nПроверьте разрешения Telegram в настройках телефона.");
-      } else if (e.error === "no-speech") {
-        onError("Ничего не услышал, попробуйте ещё раз.");
-      } else if (e.error === "network") {
-        onError("Ошибка сети при распознавании.");
-      } else if (e.error === "audio-capture") {
-        onError("Микрофон занят другим приложением.");
-      } else {
-        onError(`Ошибка: ${e.error}`);
+      cleanup();
+      isDone = true;
+      switch (e.error) {
+        case "not-allowed":
+        case "permission-denied":
+          onError(
+            "🎤 Нет разрешения на микрофон.\n\n" +
+            "На телефоне:\nНастройки → Приложения → Telegram → Разрешения → Микрофон → Разрешить\n\n" +
+            "Затем снова откройте приложение."
+          );
+          break;
+        case "no-speech":
+          onError("Ничего не услышал 🤔\nПопробуйте говорить чуть громче.");
+          break;
+        case "audio-capture":
+          onError("Микрофон занят другим приложением.\nЗакройте его и попробуйте снова.");
+          break;
+        case "network":
+          onError("Ошибка сети. Проверьте интернет.");
+          break;
+        default:
+          onError(`Ошибка распознавания: ${e.error}\nПопробуйте текстовый ввод.`);
       }
     };
 
@@ -123,21 +107,18 @@ export const Voice = {
       rec.start();
       return true;
     } catch (e) {
-      cleanupRec(); isDone = true;
-      onError("Не удалось запустить: " + e.message);
+      cleanup();
+      isDone = true;
+      onError("Не удалось запустить микрофон: " + e.message);
       return false;
     }
   },
 
-  /* Принудительная остановка (кнопка нажата повторно) */
   async stop(onFinal) {
     finish(lastText, onFinal || (() => {}));
   },
 
-  /* Освободить поток при закрытии приложения (опционально) */
   release() {
-    cleanupRec();
-    try { micStream?.getTracks().forEach(t => t.stop()); } catch {}
-    micStream = null;
+    cleanup();
   },
 };
