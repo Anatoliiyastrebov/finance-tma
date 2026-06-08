@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback, useReducer, createContext, us
 import { AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, LineChart, Line } from "recharts";
 import { Voice } from "./voice.js";
 import { TG } from "./tg.js";
+import { recognizeReceipt } from "./ocr.js";
 
 /* ═══════════════════════════════════════════════════════════
    ТЕМЫ
@@ -964,14 +965,48 @@ function Chat({state,dispatch}){
   const handleFile=useCallback(async(file)=>{
     const ext=(file.name.split(".").pop()||"").toLowerCase();
     const size=file.size<1024?file.size+"B":(file.size/1024).toFixed(0)+"KB"; down();
-    if(["jpg","jpeg","png","webp"].includes(ext)){
-      const thumb=await resizeImage(file); const ocr=mockOCR(file.name);
-      setMsgs(p=>[...p,{id:Date.now(),kind:"img",src:thumb,filename:file.name,ocr,done:false}]); down();
+
+    if(["jpg","jpeg","png","webp","heic"].includes(ext)){
+      const thumb=await resizeImage(file);
+      const msgId=Date.now();
+      // Сразу показываем фото с состоянием "загрузка"
+      setMsgs(p=>[...p,{id:msgId,kind:"img",src:thumb,filename:file.name,ocr:null,ocrProgress:0,done:false}]);
+      down();
+
+      // Запускаем настоящий OCR
+      try {
+        const result = await recognizeReceipt(thumb, (pct)=>{
+          setMsgs(p=>p.map(m=>m.id===msgId?{...m,ocrProgress:pct}:m));
+        });
+
+        // Определяем категорию по названию магазина
+        const cat = getCat(result.store);
+
+        setMsgs(p=>p.map(m=>m.id===msgId?{
+          ...m,
+          ocrProgress:100,
+          ocr:{
+            amt:  result.amount,
+            desc: result.store,
+            cat:  cat.n,
+            icon: cat.e,
+            date: result.date,
+            raw:  result.rawText?.slice(0,200),
+          }
+        }:m));
+      } catch(err) {
+        setMsgs(p=>p.map(m=>m.id===msgId?{...m,ocrError:"Не удалось распознать чек. Попробуйте более чёткое фото."}:m));
+      }
+      down();
+
     } else if(ext==="csv"){
       const text=await file.text(); const rows=parseCSV(text);
       setMsgs(p=>[...p,{id:Date.now(),kind:"csv",filename:file.name,size,rows,imported:false}]);
-      if(!rows.length) setMsgs(p=>[...p,{id:Date.now()+1,kind:"bot",text:"CSV открыт, но операции не найдены. Формат: дата;описание;сумма"}]); down();
-    } else setMsgs(p=>[...p,{id:Date.now(),kind:"bot",text:`Файл «${file.name}» получен.\nПоддерживаю: JPG/PNG (чеки), CSV (выписки).`}]);
+      if(!rows.length) setMsgs(p=>[...p,{id:Date.now()+1,kind:"bot",text:"CSV открыт, но операции не найдены. Формат: дата;описание;сумма"}]);
+      down();
+    } else {
+      setMsgs(p=>[...p,{id:Date.now(),kind:"bot",text:`Файл «${file.name}» получен.\nПоддерживаю: JPG/PNG (чеки), CSV (выписки).`}]);
+    }
   },[]);
 
   const confirmImg=useCallback((id,type,{amt,desc})=>{
@@ -1049,7 +1084,14 @@ function Chat({state,dispatch}){
   );
 }
 function ImgCard({m,onConfirm}){
-  const C=useC(); const [ed,setEd]=useState(false),[amt,setAmt]=useState(m.ocr?.amt||0),[desc,setDesc]=useState(m.ocr?.desc||"");
+  const C=useC();
+  const [ed,setEd]=useState(false);
+  const [amt,setAmt]=useState("");
+  const [desc,setDesc]=useState("");
+  useEffect(()=>{ if(m.ocr){setAmt(String(m.ocr.amt||""));setDesc(m.ocr.desc||"");} },[m.ocr]);
+  const isLoading=!m.ocr&&!m.ocrError;
+  const getAmt2=()=>parseFloat(amt)||m.ocr?.amt||0;
+  const getDesc2=()=>desc||m.ocr?.desc||"Чек";
   return(
     <div style={{marginBottom:16}}>
       <div style={{display:"flex",justifyContent:"flex-end",marginBottom:8}}>
@@ -1058,28 +1100,52 @@ function ImgCard({m,onConfirm}){
           <div style={{padding:"6px 12px",background:C.card,color:C.sub,fontSize:11}}>📎 {m.filename}</div>
         </div>
       </div>
-      {!m.done?(
+      {!m.done&&(
         <div style={{display:"flex",gap:10}}>
           <div style={{width:32,height:32,borderRadius:"50%",background:`linear-gradient(135deg,${C.gold},${C.cyan})`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,flexShrink:0}}>◈</div>
           <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:"18px 18px 18px 4px",padding:14,flex:1}}>
-            <div style={{color:C.cyan,fontSize:11,fontWeight:700,letterSpacing:1,marginBottom:10}}>🔍 РАСПОЗНАН ЧЕК</div>
-            {ed?(<>
-              <input value={desc} onChange={e=>setDesc(e.target.value)} placeholder="Описание" style={{width:"100%",background:C.input,border:`1px solid ${C.border}`,borderRadius:8,padding:"8px 10px",color:C.text,fontSize:13,marginBottom:8,outline:"none",boxSizing:"border-box"}}/>
-              <input value={amt} onChange={e=>setAmt(e.target.value)} type="number" placeholder="Сумма" style={{width:"100%",background:C.input,border:`1px solid ${C.border}`,borderRadius:8,padding:"8px 10px",color:C.text,fontSize:13,marginBottom:10,outline:"none",boxSizing:"border-box"}}/>
-            </>):(
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-                <span style={{color:C.text,fontSize:14}}>{m.ocr?.icon} {m.ocr?.desc} · {m.ocr?.cat}</span>
-                <span style={{color:C.gold,fontWeight:700,fontSize:16}}>{fmt2(m.ocr?.amt)}</span>
+            {isLoading&&(<>
+              <div style={{color:C.cyan,fontSize:11,fontWeight:700,letterSpacing:1,marginBottom:8}}>🔍 РАСПОЗНАЮ ЧЕК...</div>
+              <div style={{color:C.sub,fontSize:12,marginBottom:10}}>
+                {(m.ocrProgress||0)<10?"Загружаю OCR движок...":(m.ocrProgress||0)<90?`Читаю текст... ${m.ocrProgress}%`:"Анализирую..."}
               </div>
-            )}
-            <div style={{display:"flex",gap:8}}>
-              <button onClick={()=>onConfirm(m.id,"expense",{amt:parseFloat(amt)||m.ocr?.amt,desc:desc||m.ocr?.desc})} style={{flex:1,padding:"10px",borderRadius:10,background:C.redBg,border:`1px solid ${C.red}44`,color:C.red,fontWeight:700,fontSize:12,cursor:"pointer"}}>↓ Расход</button>
-              <button onClick={()=>onConfirm(m.id,"income",{amt:parseFloat(amt)||m.ocr?.amt,desc:desc||m.ocr?.desc})} style={{flex:1,padding:"10px",borderRadius:10,background:C.greenBg,border:`1px solid ${C.green}44`,color:C.green,fontWeight:700,fontSize:12,cursor:"pointer"}}>↑ Доход</button>
-              <button onClick={()=>setEd(!ed)} style={{padding:"10px 12px",borderRadius:10,background:C.card2,border:`1px solid ${C.border}`,color:C.sub,cursor:"pointer"}}>✏️</button>
-            </div>
+              <div style={{background:C.card2,borderRadius:4,height:6,overflow:"hidden"}}>
+                <div style={{width:`${m.ocrProgress||5}%`,height:"100%",background:`linear-gradient(90deg,${C.gold},${C.cyan})`,borderRadius:4,transition:"width .3s"}}/>
+              </div>
+            </>)}
+            {m.ocrError&&(<>
+              <div style={{color:C.red,fontSize:12,marginBottom:10}}>⚠️ {m.ocrError}</div>
+              <input value={desc} onChange={e=>setDesc(e.target.value)} placeholder="Описание" style={{width:"100%",background:C.input,border:`1px solid ${C.border}`,borderRadius:8,padding:"8px 10px",color:C.text,fontSize:13,marginBottom:8,outline:"none",boxSizing:"border-box"}}/>
+              <input value={amt} onChange={e=>setAmt(e.target.value)} type="number" placeholder="Сумма (€)" style={{width:"100%",background:C.input,border:`1px solid ${C.border}`,borderRadius:8,padding:"8px 10px",color:C.text,fontSize:13,marginBottom:10,outline:"none",boxSizing:"border-box"}}/>
+              <div style={{display:"flex",gap:8}}>
+                <button onClick={()=>{if(amt&&desc)onConfirm(m.id,"expense",{amt:getAmt2(),desc:getDesc2()});}} style={{flex:1,padding:"10px",borderRadius:10,background:C.redBg,border:`1px solid ${C.red}44`,color:C.red,fontWeight:700,fontSize:12,cursor:"pointer"}}>↓ Расход</button>
+                <button onClick={()=>{if(amt&&desc)onConfirm(m.id,"income",{amt:getAmt2(),desc:getDesc2()});}} style={{flex:1,padding:"10px",borderRadius:10,background:C.greenBg,border:`1px solid ${C.green}44`,color:C.green,fontWeight:700,fontSize:12,cursor:"pointer"}}>↑ Доход</button>
+              </div>
+            </>)}
+            {m.ocr&&!m.ocrError&&(<>
+              <div style={{color:C.cyan,fontSize:11,fontWeight:700,letterSpacing:1,marginBottom:10}}>✓ ЧЕК РАСПОЗНАН</div>
+              {ed?(<>
+                <input value={desc} onChange={e=>setDesc(e.target.value)} placeholder="Описание" style={{width:"100%",background:C.input,border:`1px solid ${C.border}`,borderRadius:8,padding:"8px 10px",color:C.text,fontSize:13,marginBottom:8,outline:"none",boxSizing:"border-box"}}/>
+                <input value={amt} onChange={e=>setAmt(e.target.value)} type="number" placeholder="Сумма" style={{width:"100%",background:C.input,border:`1px solid ${C.border}`,borderRadius:8,padding:"8px 10px",color:C.text,fontSize:13,marginBottom:10,outline:"none",boxSizing:"border-box"}}/>
+              </>):(
+                <div style={{marginBottom:10}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                    <span style={{color:C.text,fontSize:14,fontWeight:600}}>{m.ocr.icon} {m.ocr.desc}</span>
+                    {m.ocr.amt?<span style={{color:C.gold,fontWeight:700,fontSize:16}}>{fmt2(m.ocr.amt)}</span>:<span style={{color:C.red,fontSize:12}}>нет суммы ✏️</span>}
+                  </div>
+                  <div style={{color:C.muted,fontSize:11}}>{m.ocr.cat}{m.ocr.date?" · "+m.ocr.date:""}</div>
+                </div>
+              )}
+              <div style={{display:"flex",gap:8}}>
+                <button onClick={()=>onConfirm(m.id,"expense",{amt:getAmt2(),desc:getDesc2(),date:m.ocr.date})} disabled={!getAmt2()} style={{flex:1,padding:"10px",borderRadius:10,background:C.redBg,border:`1px solid ${C.red}44`,color:C.red,fontWeight:700,fontSize:12,cursor:"pointer",opacity:getAmt2()?1:.5}}>↓ Расход</button>
+                <button onClick={()=>onConfirm(m.id,"income",{amt:getAmt2(),desc:getDesc2(),date:m.ocr.date})} disabled={!getAmt2()} style={{flex:1,padding:"10px",borderRadius:10,background:C.greenBg,border:`1px solid ${C.green}44`,color:C.green,fontWeight:700,fontSize:12,cursor:"pointer",opacity:getAmt2()?1:.5}}>↑ Доход</button>
+                <button onClick={()=>setEd(!ed)} style={{padding:"10px 12px",borderRadius:10,background:C.card2,border:`1px solid ${C.border}`,color:C.sub,cursor:"pointer"}}>✏️</button>
+              </div>
+            </>)}
           </div>
         </div>
-      ):(
+      )}
+      {m.done&&(
         <div style={{display:"flex",gap:10,alignItems:"center"}}>
           <div style={{width:32,height:32,borderRadius:"50%",background:`linear-gradient(135deg,${C.gold},${C.cyan})`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:15}}>◈</div>
           <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:"14px 14px 14px 4px",padding:"9px 14px",color:C.green,fontSize:13}}>✅ Записано в базу</div>
@@ -1214,7 +1280,7 @@ function AddManual({dispatch,goBack}){
 /* ═══════════════════════════════════════════════════════════
    НАСТРОЙКИ
 ═══════════════════════════════════════════════════════════ */
-function Settings({state,dispatch}){
+function Settings({state,dispatch,onDailySummary}){
   const C=useC(); const {settings,txs}=state;
   const [pinMode,setPinMode]=useState(false),[newPin,setNewPin]=useState("");
   const setS=patch=>dispatch({type:"SET_SETTINGS",patch});
@@ -1249,6 +1315,13 @@ function Settings({state,dispatch}){
         <Row icon="🌍" label="Валюта" right={<span style={{color:C.gold,fontWeight:700}}>EUR €</span>} />
         <Row icon="🎨" label="Тёмная тема" right={<Switch on={settings.theme==="dark"} onClick={()=>setS({theme:settings.theme==="dark"?"light":"dark"})}/>} />
         <div style={{borderBottom:"none"}}><Row icon="🔔" label="Уведомления" sub="Ежедневные итоги, алерты бюджета" right={<Switch on={settings.notify} onClick={()=>toggle("notify")}/>} /></div>
+      </Card>
+      <SectionTitle>Уведомления</SectionTitle>
+      <Card style={{marginBottom:14,padding:"0 16px"}}>
+        <Row icon="🔔" label="Алерты бюджета" sub="Приходят в Telegram при превышении лимита" right={<Switch on={settings.notify} onClick={()=>toggle("notify")}/>}/>
+        <div style={{borderBottom:"none"}}>
+          <Row icon="📊" label="Отправить итог дня" sub="Сводка за сегодня придёт в Telegram" onClick={onDailySummary} right={<span style={{color:C.cyan}}>›</span>}/>
+        </div>
       </Card>
       <SectionTitle>Безопасность</SectionTitle>
       <Card style={{marginBottom:14,padding:"0 16px"}}>
@@ -1298,18 +1371,12 @@ export default function App(){
   // Инициализация Telegram Mini App
   useEffect(()=>{
     TG.init();
-    // Если имя ещё не задано — берём из Telegram автоматически
     if(!state.settings.name && TG.firstName){
       dispatch({type:"SET_SETTINGS",patch:{name:TG.firstName}});
     }
-    // Если пришли из Telegram — пропускаем онбординг (имя уже есть)
     if(TG.isInsideTelegram && !state.settings.onboarded && TG.firstName){
       dispatch({type:"SET_SETTINGS",patch:{name:TG.firstName,onboarded:true}});
     }
-    // Заранее запрашиваем разрешение на микрофон — один раз за сессию.
-    // Делаем с небольшой задержкой чтобы не пугать пользователя сразу.
-    const micTimer = setTimeout(() => { Voice.prewarm(); }, 3000);
-    return () => clearTimeout(micTimer);
   },[]);
 
   // онбординг
@@ -1321,19 +1388,65 @@ export default function App(){
     return <ThemeCtx.Provider value={C}><GlobalStyle/><LockScreen pin={state.settings.pin} onUnlock={()=>setLocked(false)} onBiometric={()=>setLocked(false)}/></ThemeCtx.Provider>;
   }
 
+  // ── Отправить уведомление через бота ──────────────────────
+  const sendNotify = async (type, data) => {
+    const chatId = TG.userId;
+    if (!chatId) return; // не в Telegram
+    try {
+      await fetch("/api/notify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chatId, type, data }),
+      });
+    } catch {}
+  };
+
   // алерт бюджета при добавлении
   const checkBudget=(tx)=>{
     if(tx.type!=="expense"||!state.settings.notify) return;
     const lim=state.budgets[tx.cat]; if(!lim) return;
     const sp=state.txs.filter(t=>t.type==="expense"&&t.cat===tx.cat&&monthKey(t.date)===monthKey()).reduce((s,t)=>s+t.amt,0)+tx.amt;
-    if(sp>=lim) setNotif({type:"red",text:`⚠️ Бюджет «${tx.cat}» превышен: ${fmt(sp)} из ${fmt(lim)}`});
-    else if(sp>=lim*0.8) setNotif({type:"orange",text:`🟡 ${tx.cat}: осталось ${fmt(lim-sp)} из ${fmt(lim)}`});
-    if(notif) setTimeout(()=>setNotif(null),4000);
+    if(sp>=lim){
+      setNotif({type:"red",text:`⚠️ Бюджет «${tx.cat}» превышен!`});
+      // Уведомление в Telegram
+      sendNotify("budget_alert",{cat:tx.cat,spent:sp.toFixed(2),limit:lim.toFixed(2)});
+    } else if(sp>=lim*0.8){
+      setNotif({type:"orange",text:`🟡 ${tx.cat}: осталось ${fmt(lim-sp)}`});
+      sendNotify("budget_warning",{cat:tx.cat,spent:sp.toFixed(2),limit:lim.toFixed(2)});
+    }
+    setTimeout(()=>setNotif(null),4000);
   };
+
+  // ── Дневной итог по кнопке ─────────────────────────────────
+  const sendDailySummary = () => {
+    const todayStr = today();
+    const todayTxs = state.txs.filter(t=>t.date===todayStr);
+    const exp = todayTxs.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amt,0);
+    const inc = todayTxs.filter(t=>t.type==="income").reduce((s,t)=>s+t.amt,0);
+    const catMap = todayTxs.filter(t=>t.type==="expense").reduce((a,t)=>({...a,[t.cat]:(a[t.cat]||0)+t.amt}),{});
+    const topCat = Object.entries(catMap).sort((a,b)=>b[1]-a[1])[0];
+    sendNotify("daily_summary",{
+      expense: exp.toFixed(2),
+      income:  inc.toFixed(2),
+      balance: (inc-exp).toFixed(2),
+      topCat:  topCat?`${topCat[0]} (${topCat[1].toFixed(2)} €)`:null,
+    });
+    setNotif({type:"green",text:"📊 Итог дня отправлен в Telegram"});
+    setTimeout(()=>setNotif(null),3000);
+  };
+
   const wrappedDispatch=(a)=>{
     if(a.type==="ADD_TX"){
       checkBudget(a.tx);
-      TG.hapticSuccess(); // вибрация при успешном добавлении
+      TG.hapticSuccess();
+    }
+    if(a.type==="ADD_TX"&&a.tx.type==="income"){
+      // Проверяем достижение целей
+      state.goals.forEach(g=>{
+        if(g.current>=g.target){
+          sendNotify("goal_reached",{icon:g.icon,name:g.name,target:g.target.toFixed(2)});
+        }
+      });
     }
     if(a.type==="DEL_TX") TG.haptic("medium");
     dispatch(a);
@@ -1350,7 +1463,9 @@ export default function App(){
       <div style={{background:C.bg,minHeight:"100vh",height:"100vh",display:"flex",flexDirection:"column",fontFamily:"'Segoe UI',system-ui,sans-serif",maxWidth:520,margin:"0 auto",position:"relative",overflow:"hidden"}}>
         {/* уведомление */}
         {notif&&(
-          <div style={{position:"absolute",top:12,left:16,right:16,zIndex:50,padding:"12px 16px",borderRadius:12,background:notif.type==="red"?C.red:C.orange,color:"#fff",fontSize:13,fontWeight:600,boxShadow:"0 8px 24px rgba(0,0,0,.3)",animation:"slideDown .3s"}} onClick={()=>setNotif(null)}>
+          <div onClick={()=>setNotif(null)} style={{position:"absolute",top:12,left:16,right:16,zIndex:50,padding:"12px 16px",borderRadius:12,
+            background:notif.type==="red"?C.red:notif.type==="green"?C.green:C.orange,
+            color:"#fff",fontSize:13,fontWeight:600,boxShadow:"0 8px 24px rgba(0,0,0,.3)",animation:"slideDown .3s"}}>
             {notif.text}
           </div>
         )}
@@ -1363,7 +1478,7 @@ export default function App(){
           {showTab==="goals"&&<div style={{overflow:"auto"}}><Goals state={state} dispatch={dispatch}/></div>}
           {showTab==="history"&&<History state={state} dispatch={dispatch}/>}
           {showTab==="add"&&<AddManual dispatch={wrappedDispatch} goBack={()=>setTab("dashboard")}/>}
-          {showTab==="settings"&&<div style={{overflow:"auto"}}><Settings state={state} dispatch={dispatch}/></div>}
+          {showTab==="settings"&&<div style={{overflow:"auto"}}><Settings state={state} dispatch={dispatch} onDailySummary={sendDailySummary}/></div>}
         </div>
 
         {/* меню "Ещё" */}
