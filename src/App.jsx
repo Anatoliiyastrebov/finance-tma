@@ -3,6 +3,7 @@ import { AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Tool
 import { Voice } from "./voice.js";
 import { TG } from "./tg.js";
 import { recognizeReceipt } from "./ocr.js";
+import { DB } from "./storage.js";
 
 /* ═══════════════════════════════════════════════════════════
    ТЕМЫ
@@ -287,60 +288,42 @@ function parseCSV(text){
 /* ═══════════════════════════════════════════════════════════
    ХРАНИЛИЩЕ (window.storage + localStorage fallback)
 ═══════════════════════════════════════════════════════════ */
-const KEYS={tx:"fin_v2_tx",budgets:"fin_v2_budgets",goals:"fin_v2_goals",settings:"fin_v2_settings"};
-function lsGet(k,def){ try{const v=localStorage.getItem(k);return v?JSON.parse(v):def;}catch{return def;} }
-function lsSet(k,v){ try{localStorage.setItem(k,JSON.stringify(v));}catch{} }
-
-const SEED_TX=(()=>{
-  const out=[]; let id=1; const now=new Date();
-  const tpl=[
-    ["expense","Еда","🛒","Supermarkt",30,60],["expense","Транспорт","🚕","Taxi",8,25],
-    ["expense","Развлечения","🎬","Kino",10,30],["expense","Еда","☕","Café",4,12],
-    ["expense","Здоровье","💊","Apotheke",10,40],["expense","Одежда","👗","Zara",25,90],
-  ];
-  for(let d=0; d<26; d++){
-    const date=new Date(now); date.setDate(now.getDate()-d);
-    const ds=date.toISOString().slice(0,10);
-    const count=Math.floor(Math.random()*2)+1;
-    for(let i=0;i<count;i++){
-      const[type,cat,icon,desc,lo,hi]=tpl[Math.floor(Math.random()*tpl.length)];
-      out.push({id:id++,type,cat,icon,desc,amt:Math.round((Math.random()*(hi-lo)+lo)*100)/100,date:ds,src:["manual","voice","image"][Math.floor(Math.random()*3)]});
-    }
-  }
-  // доходы
-  out.push({id:id++,type:"income",cat:"Зарплата",icon:"💼",desc:"Gehalt",amt:3200,date:new Date(now.getFullYear(),now.getMonth(),1).toISOString().slice(0,10),src:"manual"});
-  out.push({id:id++,type:"income",cat:"Фриланс",icon:"💻",desc:"Projekt Alpha",amt:850,date:new Date(now.getTime()-5*864e5).toISOString().slice(0,10),src:"voice"});
-  return out.sort((a,b)=>b.date.localeCompare(a.date));
-})();
+const SEED_TX=[];  // новые пользователи начинают с пустой базы
 const SEED_BUDGETS={"Еда":400,"Транспорт":150,"Развлечения":120,"ЖКХ":900,"Здоровье":80};
-const SEED_GOALS=[
-  {id:1,name:"Отпуск",icon:"🏖️",target:2000,current:650,deadline:"2026-08-01",color:"#38BDE8"},
-  {id:2,name:"Новый ноутбук",icon:"💻",target:1500,current:1500,deadline:"2026-07-01",color:"#A78BFA"},
-];
+const SEED_GOALS=[];
+const SEED_SETTINGS={name:"",currency:"EUR",theme:"dark",pin:"",onboarded:false,notify:true};
 
+/* Синхронное сохранение через DB (async в фоне) */
 function reducer(state,a){
   let s={...state};
   switch(a.type){
-    case"ADD_TX": s.txs=[{...a.tx,id:Date.now(),date:a.tx.date||today()},...state.txs]; lsSet(KEYS.tx,s.txs); break;
-    case"ADD_MANY": s.txs=[...a.txs.map((t,i)=>({...t,id:Date.now()+i,date:t.date||today()})),...state.txs]; lsSet(KEYS.tx,s.txs); break;
-    case"DEL_TX": s.txs=state.txs.filter(t=>t.id!==a.id); lsSet(KEYS.tx,s.txs); break;
-    case"EDIT_TX": s.txs=state.txs.map(t=>t.id===a.id?{...t,...a.patch}:t); lsSet(KEYS.tx,s.txs); break;
-    case"SET_BUDGET": s.budgets={...state.budgets,[a.cat]:a.limit}; if(!a.limit)delete s.budgets[a.cat]; lsSet(KEYS.budgets,s.budgets); break;
-    case"ADD_GOAL": s.goals=[...state.goals,{...a.goal,id:Date.now(),current:0}]; lsSet(KEYS.goals,s.goals); break;
-    case"FUND_GOAL": s.goals=state.goals.map(g=>g.id===a.id?{...g,current:Math.min(g.target,g.current+a.amt)}:g); lsSet(KEYS.goals,s.goals); break;
-    case"DEL_GOAL": s.goals=state.goals.filter(g=>g.id!==a.id); lsSet(KEYS.goals,s.goals); break;
-    case"SET_SETTINGS": s.settings={...state.settings,...a.patch}; lsSet(KEYS.settings,s.settings); break;
+    case"ADD_TX":    s.txs=[{...a.tx,id:Date.now(),date:a.tx.date||today()},...state.txs]; DB.saveTxs(s.txs); break;
+    case"ADD_MANY":  s.txs=[...a.txs.map((t,i)=>({...t,id:Date.now()+i,date:t.date||today()})),...state.txs]; DB.saveTxs(s.txs); break;
+    case"DEL_TX":    s.txs=state.txs.filter(t=>t.id!==a.id); DB.saveTxs(s.txs); break;
+    case"EDIT_TX":   s.txs=state.txs.map(t=>t.id===a.id?{...t,...a.patch}:t); DB.saveTxs(s.txs); break;
+    case"SET_BUDGET":s.budgets={...state.budgets,[a.cat]:a.limit}; if(!a.limit)delete s.budgets[a.cat]; DB.saveBudgets(s.budgets); break;
+    case"ADD_GOAL":  s.goals=[...state.goals,{...a.goal,id:Date.now(),current:0}]; DB.saveGoals(s.goals); break;
+    case"FUND_GOAL": s.goals=state.goals.map(g=>g.id===a.id?{...g,current:Math.min(g.target,g.current+a.amt)}:g); DB.saveGoals(s.goals); break;
+    case"DEL_GOAL":  s.goals=state.goals.filter(g=>g.id!==a.id); DB.saveGoals(s.goals); break;
+    case"SET_SETTINGS": s.settings={...state.settings,...a.patch}; DB.saveSettings(s.settings); break;
+    case"LOAD_ALL":  return {...state,...a.data}; // загрузка из облака
     default: return state;
   }
   return s;
 }
+
+/* Начальное состояние — синхронно из localStorage (быстро),
+   потом асинхронно обновляется из Telegram Cloud             */
 function initState(){
-  return {
-    txs: lsGet(KEYS.tx,SEED_TX),
-    budgets: lsGet(KEYS.budgets,SEED_BUDGETS),
-    goals: lsGet(KEYS.goals,SEED_GOALS),
-    settings: lsGet(KEYS.settings,{name:"",currency:"EUR",theme:"dark",pin:"",onboarded:false,notify:true}),
-  };
+  try{
+    const ls=k=>{ try{const v=localStorage.getItem(k);return v?JSON.parse(v):null;}catch{return null;} };
+    return {
+      txs:      ls("fin_v2_tx")       || SEED_TX,
+      budgets:  ls("fin_v2_budgets")  || SEED_BUDGETS,
+      goals:    ls("fin_v2_goals")    || SEED_GOALS,
+      settings: ls("fin_v2_settings") || SEED_SETTINGS,
+    };
+  }catch{ return {txs:SEED_TX,budgets:SEED_BUDGETS,goals:SEED_GOALS,settings:SEED_SETTINGS}; }
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -1286,7 +1269,7 @@ function Settings({state,dispatch,onDailySummary}){
   const setS=patch=>dispatch({type:"SET_SETTINGS",patch});
   const toggle=(k)=>setS({[k]:!settings[k]});
   const savePin=()=>{ if(newPin.length>=4){setS({pin:newPin});setPinMode(false);setNewPin("");} };
-  const clearAll=()=>{ if(confirm("Удалить все данные? Это нельзя отменить.")){ Object.values(KEYS).forEach(k=>localStorage.removeItem(k)); location.reload(); } };
+  const clearAll=()=>{ if(confirm("Удалить все данные? Это нельзя отменить.")){ DB.clearAll().finally(()=>location.reload()); } };
   const backup=()=>{
     const data=JSON.stringify({txs:state.txs,budgets:state.budgets,goals:state.goals,settings:state.settings});
     const blob=new Blob([data],{type:"application/json"}); const a=document.createElement("a");
@@ -1344,7 +1327,12 @@ function Settings({state,dispatch,onDailySummary}){
         <Row icon="📊" label="Записей в базе" right={<span style={{color:C.sub,fontWeight:600}}>{txs.length}</span>} />
         <div style={{borderBottom:"none"}}><Row icon="🗑" label="Очистить всё" sub="Удалить все данные навсегда" onClick={clearAll} right={<span style={{color:C.red}}>›</span>} /></div>
       </Card>
-      <div style={{textAlign:"center",color:C.muted,fontSize:12,marginTop:20}}>FinanceAI · v2.0 · Офлайн · Локальные данные</div>
+      <div style={{textAlign:"center",color:C.muted,fontSize:12,marginTop:20}}>
+        {DB.mode==="telegram"
+          ? "☁️ Данные синхронизируются через Telegram"
+          : "📱 Данные хранятся локально"}
+        <br/>FinanceAI · v3.0
+      </div>
     </div>
   );
 }
@@ -1376,6 +1364,22 @@ export default function App(){
     }
     if(TG.isInsideTelegram && !state.settings.onboarded && TG.firstName){
       dispatch({type:"SET_SETTINGS",patch:{name:TG.firstName,onboarded:true}});
+    }
+    // Загружаем данные из Telegram Cloud (асинхронно, после быстрого старта)
+    if(DB.mode==="telegram"){
+      Promise.all([
+        DB.loadTxs(state.txs),
+        DB.loadBudgets(state.budgets),
+        DB.loadGoals(state.goals),
+        DB.loadSettings(state.settings),
+      ]).then(([txs,budgets,goals,settings])=>{
+        dispatch({type:"LOAD_ALL",data:{
+          txs:    txs    || state.txs,
+          budgets:budgets|| state.budgets,
+          goals:  goals  || state.goals,
+          settings:{...state.settings,...settings},
+        }});
+      }).catch(()=>{});
     }
   },[]);
 
