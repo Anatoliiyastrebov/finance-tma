@@ -259,34 +259,37 @@ function initState(){
    ГОЛОС
 ═══════════════════════════════════════════════════════════ */
 function useVoice(onDone){
-  const [on,setOn]=useState(false), [live,setLive]=useState(""), [err,setErr]=useState(""), [supported,setSupported]=useState(true);
-  const safetyTimer=useRef(null);
+  const [on,setOn]=useState(false);
+  const [live,setLive]=useState("");
+  const [err,setErr]=useState("");
+  const [supported,setSupported]=useState(true);
+
   useEffect(()=>{ Voice.available().then(setSupported); },[]);
-  const finish=useCallback((text)=>{
-    setOn(false); setLive("");
-    if(safetyTimer.current){ clearTimeout(safetyTimer.current); safetyTimer.current=null; }
-    if(text&&text.trim()) onDone(text.trim());
-  },[onDone]);
+
   const toggle=useCallback(async()=>{
+    // СТОП — кнопка нажата повторно
     if(on){
-      // ПРИНУДИТЕЛЬНАЯ остановка по нажатию — сразу снимаем "слушаю"
       setOn(false);
-      await Voice.stop(finish);
       setLive("");
+      await Voice.stop((text)=>{ if(text) onDone(text); });
       return;
     }
-    setErr(""); setLive("");
-    const started=await Voice.start(
-      (partial)=>setLive(partial),
-      (final)=>finish(final),
-      (errMsg)=>{ setErr(errMsg); setOn(false); setLive(""); if(safetyTimer.current)clearTimeout(safetyTimer.current); }
+    // СТАРТ
+    setErr("");
+    setLive("");
+    setOn(true); // сразу показываем что слушаем
+
+    const started = await Voice.start(
+      (partial) => setLive(partial),
+      (final)   => { setOn(false); setLive(""); if(final) onDone(final); },
+      (errMsg)  => { setOn(false); setLive(""); setErr(errMsg); }
     );
-    if(started){
-      setOn(true);
-      // страховка: если за 20 сек ничего не пришло — принудительно закрываем кнопку
-      safetyTimer.current=setTimeout(()=>{ Voice.stop(finish); setOn(false); setLive(""); },20000);
-    }
-  },[on,onDone,finish]);
+
+    // если старт не удался — сбрасываем кнопку
+    if(!started) setOn(false);
+
+  },[on,onDone]);
+
   return{on,live,err,setErr,toggle,supported};
 }
 
@@ -1130,12 +1133,7 @@ function Settings({state,dispatch}){
   const setS=patch=>dispatch({type:"SET_SETTINGS",patch});
   const toggle=(k)=>setS({[k]:!settings[k]});
   const savePin=()=>{ if(newPin.length>=4){setS({pin:newPin});setPinMode(false);setNewPin("");} };
-  const clearAll=()=>{ if(confirm("Удалить все данные? Это нельзя отменить.")){
-  lsSet(KEYS.tx,[]); 
-  lsSet(KEYS.budgets,{}); 
-  lsSet(KEYS.goals,[]); 
-  location.reload(); 
-}};
+  const clearAll=()=>{ if(confirm("Удалить все данные? Это нельзя отменить.")){ Object.values(KEYS).forEach(k=>localStorage.removeItem(k)); location.reload(); } };
   const backup=()=>{
     const data=JSON.stringify({txs:state.txs,budgets:state.budgets,goals:state.goals,settings:state.settings});
     const blob=new Blob([data],{type:"application/json"}); const a=document.createElement("a");
