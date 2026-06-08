@@ -162,36 +162,24 @@ function nlp(raw){
   const EXP=/потратил[а]?|купил[а]?|заплатил[а]?|оплатил[а]?|списал[и]?|расход\b|трата\b|снял[а]?\b|израсход|ausgegeben|gekauft|bezahlt|ausgabe|kosten\b|ich habe.*gekauft|ich habe.*bezahlt/;
   const INC=/получил[а]?|заработал[а]?|зарплата\b|пришло\b|поступил|перевод\b|фриланс\b|доход\b|начислил|выплатил|erhalten|bekommen|verdient|einnahme|gehalt\b|lohn\b/;
 
-  // Служебные команды — проверяем первыми
-  if(/удали.*(последн|запис)|отмени.*(последн|запис)|убери последн/.test(t)) return {i:"DEL_LAST"};
-  if(/(исправь|перепиши|измени|поправь).*(последн|запис)/.test(t)) return {i:"FIX_LAST",raw};
-  if(/баланс|остаток|сколько.*(у меня|денег|осталось)|итого/.test(t)) return {i:"BAL"};
-  if(/(потратил|расход).*(всего|за|сегодня|неделю|месяц)|сколько.*(потратил|трат)/.test(t)) return {i:"EXP_TOTAL"};
-  if(/(доход|заработал|получил).*(итого|всего|за)|сколько.*(заработ|получил)/.test(t)) return {i:"INC_TOTAL"};
-  const cq=/(сколько).*(потратил)?\s*на\s+(\w+)/.exec(t); if(cq) return {i:"BY_CAT",cat:getCat(cq[3])};
-  if(/бюджет|лимит/.test(t)) return {i:"BUDGET"};
-  if(/цел|копил|накоп/.test(t)) return {i:"GOALS"};
-  if(/истори|список|последн|транзакц|операц/.test(t)) return {i:"HIST"};
-  if(/совет|экономи|сократи|как.*сэконом/.test(t)) return {i:"ADV"};
-  if(/прогноз|хватит|до конца месяца/.test(t)) return {i:"FORECAST"};
-  if(/привет|здравств|помог|умеешь|команды/.test(t)) return {i:"HELP"};
-
-  // Транзакции
+  // ── СНАЧАЛА проверяем транзакции с суммой ──────────────────
+  // Если есть глагол И число — это точно транзакция, не запрос
   if(EXP.test(t)){
     const amt=getAmt(raw); const cat=getCat(t);
     const EXP_WORDS=["потратил[а]?","купил[а]?","заплатил[а]?","оплатил[а]?","расход","трата","снял[а]?","на\\b","за\\b","в\\b","из\\b"];
     const desc=cleanDesc(raw,EXP_WORDS)||cat.n;
-    return {i:"EXP",amt,cat,desc:desc.slice(0,35)};
+    // Если нет суммы — возможно это запрос («сколько потратил»)
+    if(amt) return {i:"EXP",amt,cat,desc:desc.slice(0,35)};
   }
   if(INC.test(t)){
     const amt=getAmt(raw); const cat=getCat(t);
     const INC_WORDS=["получил[а]?","заработал[а]?","зарплата","пришло","поступил","перевод","фриланс","начислил","от\\b","за\\b"];
     const desc=cleanDesc(raw,INC_WORDS)||cat.n;
-    return {i:"INC",amt,cat,desc:desc.slice(0,35)};
+    // Если нет суммы — возможно это запрос («сколько получил»)
+    if(amt) return {i:"INC",amt,cat,desc:desc.slice(0,35)};
   }
 
   // Без глагола: «зарплата 1800», «Gehalt 2500», «аванс 500»
-  // → категория дохода + число = доход
   const incCatRe=/зарплата|аванс|оклад|gehalt|lohn|salary|фриланс|freelance|honorar/i;
   if(incCatRe.test(t)){
     const amt=getAmt(raw); const cat=getCat(t);
@@ -199,20 +187,35 @@ function nlp(raw){
   }
 
   // Без глагола: «такси 18», «Lidl 45,20», «кафе 12,50»
-  // → категория расхода + число = расход
   const expCatRe=getCat(t);
   if(expCatRe.n!=="Другое"){
     const amt=getAmt(raw);
     if(amt) return {i:"EXP",amt,cat:expCatRe,desc:cleanDesc(raw)||expCatRe.n};
   }
 
-  // Пользователь отвечает на переспрос: «получил» / «расход» / «доход»
-  if(/^(получил[а]?|доход|income|einnahme)[\s!.]*$/i.test(t.trim()))
-    return {i:"CONFIRM_INC"};
-  if(/^(потратил[а]?|расход|ausgabe|expense|потратил)[\s!.]*$/i.test(t.trim()))
-    return {i:"CONFIRM_EXP"};
+  // ── ПОТОМ проверяем информационные запросы ─────────────────
+  if(/удали.*(последн|запис)|отмени.*(последн|запис)|убери последн/.test(t)) return {i:"DEL_LAST"};
+  if(/(исправь|перепиши|измени|поправь).*(последн|запис)/.test(t)) return {i:"FIX_LAST",raw};
+  if(/баланс|остаток|сколько.*(у меня|денег|осталось)|итого/.test(t)) return {i:"BAL"};
+  if(/(потратил|расход).*(всего|сегодня|неделю|месяц)|сколько.*(потратил|трат)/.test(t)) return {i:"EXP_TOTAL"};
+  if(/(доход|заработал|получил).*(итого|всего)|сколько.*(заработ|получил)/.test(t)) return {i:"INC_TOTAL"};
+  const cq=/(сколько).*(потратил)?\s*на\s+(\w+)/.exec(t); if(cq) return {i:"BY_CAT",cat:getCat(cq[3])};
+  if(/бюджет|лимит/.test(t)) return {i:"BUDGET"};
+  if(/цел|копил|накоп/.test(t)) return {i:"GOALS"};
+  if(/истори|список|транзакц|операц/.test(t)) return {i:"HIST"};
+  if(/совет|экономи|сократи|как.*сэконом/.test(t)) return {i:"ADV"};
+  if(/прогноз|хватит|до конца месяца/.test(t)) return {i:"FORECAST"};
+  if(/привет|здравств|помог|умеешь|команды/.test(t)) return {i:"HELP"};
 
-  // Есть число но нет ключевых слов — просим уточнить
+  // Ответ на переспрос
+  if(/^(получил[а]?|доход|income|einnahme)[\s!.]*$/i.test(t.trim())) return {i:"CONFIRM_INC"};
+  if(/^(потратил[а]?|расход|ausgabe|expense)[\s!.]*$/i.test(t.trim()))  return {i:"CONFIRM_EXP"};
+
+  // Глагол без суммы — спрашиваем
+  if(EXP.test(t)) return {i:"?",hint:"EXP"};
+  if(INC.test(t)) return {i:"?",hint:"INC"};
+
+  // Есть число но нет контекста
   const amt=getAmt(raw);
   if(amt) return {i:"CLARIFY",amt,raw};
 
@@ -233,10 +236,14 @@ function run(intent,txs,budgets,goals){
         addTx:{type:"expense",amt:intent.pendingAmt,cat:intent.pendingCat?.n||"Другое",icon:intent.pendingCat?.e||"📦",desc:intent.pendingDesc||"Расход",src:"text"}};
     case"EXP": return intent.amt
       ?{text:`✅ Записал: **−${fmt2(intent.amt)}** ${intent.cat.e} ${intent.desc}`,addTx:{type:"expense",amt:intent.amt,cat:intent.cat.n,icon:intent.cat.e,desc:intent.desc,src:"text"}}
-      :{text:"Не расслышал сумму 🤔\nПример: «Потратил 45 на еду»"};
+      :{text:"Не расслышал сумму 🤔\nПример: «Потратил 45,50 на еду»"};
     case"INC": return intent.amt
       ?{text:`✅ Доход: **+${fmt2(intent.amt)}** ${intent.cat.e} ${intent.desc}`,addTx:{type:"income",amt:intent.amt,cat:intent.cat.n,icon:intent.cat.e,desc:intent.desc,src:"text"}}
-      :{text:"Не расслышал сумму 🤔\nПример: «Получил зарплату 3200»"};
+      :{text:"Не расслышал сумму 🤔\nПример: «Получил зарплату 1750»"};
+    case"?":
+      if(intent.hint==="INC") return {text:"Не расслышал сумму 🤔\nСкажите: «Получил зарплату 1750»"};
+      if(intent.hint==="EXP") return {text:"Не расслышал сумму 🤔\nСкажите: «Потратил 45 на еду»"};
+      return {text:`Не понял 🤔 Попробуйте:\n«Получил зарплату 1750»\n«Потратил 20 на кофе»\n«Какой баланс?»`};
     case"DEL_LAST":{
       if(!txs.length) return {text:"Записей пока нет."};
       const last=txs[0];
@@ -286,9 +293,8 @@ function run(intent,txs,budgets,goals){
       return{text:`💡 **Совет**\nГлавная статья: ${top?top[0]:"нет данных"}\n\nПравило 50/30/20:\n• 50% — нужды\n• 30% — желания\n• 20% — накопления\n\nСоздайте лимит на эту категорию во вкладке «Бюджет».`};
     }
     case"HELP": return{text:`👋 Что я умею:\n\n🎤 Голос: «Потратил 45 на еду»\n⌨️ Текст любой командой\n📷 Фото чека — распознаю сумму\n📊 CSV выписка — импортирую\n\n✏️ Исправить ошибку:\n«Удали последнюю»\n«Исправь последнюю: потратил 25 в Пени»\nили в Истории кнопка «изменить»\n\n❓ Спросите:\n«Какой баланс?»\n«Прогноз на месяц»\n«Совет по экономии»`};
-    default:
-      if(intent.i==="CLARIFY") return {text:`Вижу сумму **${fmt2(intent.amt)}** 🤔\n\nЭто расход или доход?\nНапишите одно слово:\n• «получил» → запишу как доход\n• «потратил» → запишу как расход`};
-      return{text:`Не понял 🤔 Попробуйте:\n«Потратил 20 на кофе»\n«Получил зарплату 1700»\n«Какой баланс?»\n«Прогноз на месяц»`};
+    case"CLARIFY": return {text:`Вижу сумму **${fmt2(intent.amt)}** 🤔\n\nЭто расход или доход?\nНапишите одно слово:\n• «получил» → запишу как доход\n• «потратил» → запишу как расход`};
+    default: return{text:`Не понял 🤔 Попробуйте:\n«Получил зарплату 1750»\n«Потратил 45,50 на еду»\n«Какой баланс?»`};
   }
 }
 
@@ -660,39 +666,33 @@ function Analytics({state}){
   const now=new Date();
 
   /* ── Вычисляем границы выбранного периода ─────────────────── */
-  const {pStart,pEnd,pLabel,prevStart,prevEnd}=useMemo(()=>{
+  const {pStart,pEnd,pLabel}=useMemo(()=>{
     const d=new Date();
-    let ps,pe,prevS,prevE,label;
+    let ps,pe,label;
 
     if(period==="week"){
-      // Начало недели (пн) + offset недель
-      const day=d.getDay()||7; // 1=пн..7=вс
+      // Неделя пн-вс + offset
+      const day=d.getDay()||7;
       d.setDate(d.getDate()-day+1+offset*7);
       d.setHours(0,0,0,0);
       ps=new Date(d);
       pe=new Date(d); pe.setDate(pe.getDate()+7);
-      prevS=new Date(d); prevS.setDate(prevS.getDate()-7);
-      prevE=new Date(ps);
       const endD=new Date(pe); endD.setDate(endD.getDate()-1);
       label=`${ps.getDate()} ${monthName[ps.getMonth()]} — ${endD.getDate()} ${monthName[endD.getMonth()]}`;
     } else if(period==="month"){
-      // Месяц + offset месяцев
+      // Полный месяц с 1-го по последнее число
       const base=new Date(now.getFullYear(),now.getMonth()+offset,1);
       ps=base;
       pe=new Date(base.getFullYear(),base.getMonth()+1,1);
-      prevS=new Date(base.getFullYear(),base.getMonth()-1,1);
-      prevE=new Date(base);
       label=`${monthName[base.getMonth()]} ${base.getFullYear()}`;
     } else {
-      // Год + offset лет
+      // Полный год
       const y=now.getFullYear()+offset;
       ps=new Date(y,0,1);
       pe=new Date(y+1,0,1);
-      prevS=new Date(y-1,0,1);
-      prevE=new Date(y,0,1);
       label=`${y} год`;
     }
-    return {pStart:ps,pEnd:pe,pLabel:label,prevStart:prevS,prevEnd:prevE};
+    return {pStart:ps,pEnd:pe,pLabel:label};
   },[period,offset,now.getTime()]);
 
   const isCurrentPeriod=offset===0;
@@ -700,14 +700,8 @@ function Analytics({state}){
   /* ── Фильтрация транзакций ──────────────────────────────────── */
   const inRange=(t,s,e)=>{const d=new Date(t.date);return d>=s&&d<e;};
   const cur=txs.filter(t=>inRange(t,pStart,pEnd));
-  const prev=txs.filter(t=>inRange(t,prevStart,prevEnd));
-
   const curExp=cur.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amt,0);
-  const prevExp=prev.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amt,0);
   const curInc=cur.filter(t=>t.type==="income").reduce((s,t)=>s+t.amt,0);
-  const prevInc=prev.filter(t=>t.type==="income").reduce((s,t)=>s+t.amt,0);
-  const diffExp=prevExp>0?Math.round((curExp-prevExp)/prevExp*100):null;
-  const diffInc=prevInc>0?Math.round((curInc-prevInc)/prevInc*100):null;
   const days=Math.max(1,Math.ceil((Math.min(now,pEnd)-pStart)/864e5));
   const avgDay=curExp/days;
 
@@ -760,13 +754,7 @@ function Analytics({state}){
   })):[];
   const maxMonthExp=Math.max(1,...monthRows.map(r=>r.exp));
 
-  const Badge=({diff,inv})=>{
-    if(diff===null) return null;
-    const bad=(inv?diff<0:diff>0);
-    return <span style={{fontSize:11,fontWeight:700,padding:"2px 7px",borderRadius:20,background:(bad?C.red:C.green)+"1A",color:bad?C.red:C.green}}>
-      {diff>0?"▲":"▼"} {Math.abs(diff)}%
-    </span>;
-  };
+
 
   const PERIODS=[["week","Неделя"],["month","Месяц"],["year","Год"]];
 
@@ -812,18 +800,12 @@ function Analytics({state}){
         <Card style={{flex:1,padding:14}}>
           <div style={{color:C.sub,fontSize:10,textTransform:"uppercase",letterSpacing:1}}>Расходы</div>
           <div style={{color:C.red,fontSize:20,fontWeight:800,marginTop:3}}>{fmt(curExp)}</div>
-          <div style={{display:"flex",alignItems:"center",gap:6,marginTop:5}}>
-            <Badge diff={diffExp}/>
-            {diffExp!==null&&<span style={{color:C.muted,fontSize:10}}>к пред.</span>}
-          </div>
+
         </Card>
         <Card style={{flex:1,padding:14}}>
           <div style={{color:C.sub,fontSize:10,textTransform:"uppercase",letterSpacing:1}}>Доходы</div>
           <div style={{color:C.green,fontSize:20,fontWeight:800,marginTop:3}}>{fmt(curInc)}</div>
-          <div style={{display:"flex",alignItems:"center",gap:6,marginTop:5}}>
-            <Badge diff={diffInc} inv/>
-            {diffInc!==null&&<span style={{color:C.muted,fontSize:10}}>к пред.</span>}
-          </div>
+
         </Card>
       </div>
 
