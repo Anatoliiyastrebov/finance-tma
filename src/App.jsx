@@ -55,12 +55,86 @@ const ALL_CATS = ["Еда","Транспорт","Развлечения","ЖКХ
 const CAT_ICON = {"Еда":"🛒","Транспорт":"🚕","Развлечения":"🎬","ЖКХ":"🏠","Здоровье":"💊","Одежда":"👗","Техника":"📱","Зарплата":"💼","Фриланс":"💻","Другое":"📦"};
 const CAT_COLOR = {"Еда":"#22C55E","Транспорт":"#38BDE8","Развлечения":"#A78BFA","ЖКХ":"#FB923C","Здоровье":"#EF4444","Одежда":"#EC4899","Техника":"#06B6D4","Зарплата":"#10B981","Фриланс":"#8B5CF6","Другое":"#94A3B8"};
 function getCat(t){ const s=t.toLowerCase(); for(const c of CATS) if(new RegExp(c.k).test(s)) return c; return {n:"Другое",e:"📦",c:"#94A3B8"}; }
-function getAmt(t){
-  const m=t.match(/(\d[\d\s]*)(?:[.,](\d{1,2}))?/);
-  if(!m) return null;
-  let n=parseFloat((m[1]||"0").replace(/\s/g,"")+(m[2]?"."+m[2]:""));
-  if(/тысяч|тыс\b/i.test(t)&&n<1000) n*=1000;
-  return isNaN(n)||n<0.01?null:n;
+function getAmt(raw){
+  const t = raw.toLowerCase()
+    .replace(/евро|euros?|eur|€/gi, "")   // убираем обозначения валюты
+    .replace(/рублей|руб|₽/gi, "")
+    .trim();
+
+  /* ── 1. Словесные числа ─────────────────────────────────── */
+  const words = {
+    "один":1,"одна":1,"два":2,"две":2,"три":3,"четыре":4,"пять":5,
+    "шесть":6,"семь":7,"восемь":8,"девять":9,"десять":10,
+    "одиннадцать":11,"двенадцать":12,"тринадцать":13,"четырнадцать":14,
+    "пятнадцать":15,"шестнадцать":16,"семнадцать":17,"восемнадцать":18,"девятнадцать":19,
+    "двадцать":20,"тридцать":30,"сорок":40,"пятьдесят":50,
+    "шестьдесят":60,"семьдесят":70,"восемьдесят":80,"девяносто":90,
+    "сто":100,"двести":200,"триста":300,"четыреста":400,
+    "пятьсот":500,"шестьсот":600,"семьсот":700,"восемьсот":800,"девятьсот":900,
+    "тысяча":1000,"тысячи":1000,"тысяч":1000,
+  };
+  let wordTotal = 0, wordFound = false;
+  // "тысяча семьсот" → 1700, "две тысячи пятьсот" → 2500
+  const parts = t.split(/\s+/);
+  let cur = 0, total = 0;
+  for(const p of parts){
+    if(words[p] !== undefined){
+      wordFound = true;
+      const v = words[p];
+      if(v === 1000){ total += (cur || 1) * 1000; cur = 0; }
+      else if(v >= 100){ cur += v; }
+      else { cur += v; }
+    }
+  }
+  if(wordFound){ wordTotal = total + cur; if(wordTotal > 0) return wordTotal; }
+
+  /* ── 2. Цифровые числа — умный парсер ───────────────────── */
+  // Убираем всё кроме цифр, пробелов, точек, запятых
+  const clean = t.replace(/[^\d\s.,]/g, " ").trim();
+
+  // Ищем число: возможно с разделителями тысяч и дробной частью
+  const numRe = /(\d{1,3}(?:[.\s]\d{3})+(?:[,]\d{1,2})?|\d+[,]\d{1,2}|\d+[.]\d{1,2}|\d+)/g;
+  const matches = [...clean.matchAll(numRe)];
+  if(!matches.length) return null;
+
+  // Берём первое совпадение
+  let numStr = matches[0][0].replace(/\s/g, "");
+
+  let n;
+  if(/^\d{1,3}([.]\d{3})+([,]\d{1,2})?$/.test(numStr)){
+    // Европейский формат: 1.700 или 1.700,50
+    n = parseFloat(numStr.replace(/\./g,"").replace(",","."));
+  } else if(/^\d+[,]\d{1,2}$/.test(numStr)){
+    // Десятичная запятая: 45,50
+    n = parseFloat(numStr.replace(",","."));
+  } else if(/^\d+[.]\d{3}$/.test(numStr)){
+    // Точка как разделитель тысяч: 1.700
+    n = parseFloat(numStr.replace(".",""));
+  } else {
+    // Обычное число: 1700 или 1700.50
+    n = parseFloat(numStr);
+  }
+
+  if(isNaN(n) || n <= 0) return null;
+
+  /* ── 3. Множители ───────────────────────────────────────── */
+  if(/тысяч|тыс\b|\bк\b|k\b/i.test(raw) && n < 1000) n *= 1000;
+  if(/миллион/i.test(raw) && n < 1000000) n *= 1000000;
+  if(/полтора/i.test(raw)) n = 1.5 * (n || 1000);
+  if(/полтин|пятьдесят|50/i.test(raw) && /тысяч/i.test(raw)) n = 50000;
+
+  return n;
+}
+
+/* ─── Вычищаем число и ключевые слова из описания ─────────── */
+function cleanDesc(raw, extraWords = []){
+  return raw
+    .replace(/\d{1,3}(?:[.\s]\d{3})*(?:[,.]\d{1,2})?|\d+(?:[,.]\d{1,2})?/g, "")
+    .replace(/евро|euros?|eur|€|рублей|руб|₽/gi, "")
+    .replace(/тысяч\w*|тысяч|тыс\b/gi, "")
+    .replace(new RegExp(extraWords.join("|"), "gi"), "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -68,18 +142,10 @@ function getAmt(t){
 ═══════════════════════════════════════════════════════════ */
 function nlp(raw){
   const t=raw.toLowerCase();
-  const EXP=/потратил[а]?|купил[а]?|заплатил[а]?|оплатил[а]?|списал[и]?|расход\b|трата|снял[а]?\b/;
-  const INC=/получил[а]?|заработал[а]?|зарплата\b|пришло\b|поступил|перевод\b|фриланс\b|доход\b/;
-  if(EXP.test(t)){
-    const amt=getAmt(t),cat=getCat(t);
-    const desc=raw.replace(/\d[\d\s]*(?:тыс|руб|р\.|евро|€)?\.?/gi,"").replace(/потратил[а]?|купил[а]?|заплатил[а]?|оплатил[а]?|на\b|за\b|в\b/gi,"").trim()||cat.n;
-    return {i:"EXP",amt,cat,desc:desc.slice(0,35)};
-  }
-  if(INC.test(t)){
-    const amt=getAmt(t),cat=getCat(t);
-    const desc=raw.replace(/\d[\d\s]*(?:тыс|руб|р\.|евро|€)?\.?/gi,"").replace(/получил[а]?|заработал[а]?|от\b|за\b/gi,"").trim()||cat.n;
-    return {i:"INC",amt,cat,desc:desc.slice(0,35)};
-  }
+  const EXP=/потратил[а]?|купил[а]?|заплатил[а]?|оплатил[а]?|списал[и]?|расход\b|трата\b|снял[а]?\b|израсход/;
+  const INC=/получил[а]?|заработал[а]?|зарплата\b|пришло\b|поступил|перевод\b|фриланс\b|доход\b|начислил|выплатил/;
+
+  // Служебные команды — проверяем первыми
   if(/удали.*(последн|запис)|отмени.*(последн|запис)|убери последн/.test(t)) return {i:"DEL_LAST"};
   if(/(исправь|перепиши|измени|поправь).*(последн|запис)/.test(t)) return {i:"FIX_LAST",raw};
   if(/баланс|остаток|сколько.*(у меня|денег|осталось)|итого/.test(t)) return {i:"BAL"};
@@ -92,6 +158,25 @@ function nlp(raw){
   if(/совет|экономи|сократи|как.*сэконом/.test(t)) return {i:"ADV"};
   if(/прогноз|хватит|до конца месяца/.test(t)) return {i:"FORECAST"};
   if(/привет|здравств|помог|умеешь|команды/.test(t)) return {i:"HELP"};
+
+  // Транзакции
+  if(EXP.test(t)){
+    const amt=getAmt(raw); const cat=getCat(t);
+    const EXP_WORDS=["потратил[а]?","купил[а]?","заплатил[а]?","оплатил[а]?","расход","трата","снял[а]?","на\\b","за\\b","в\\b","из\\b"];
+    const desc=cleanDesc(raw,EXP_WORDS)||cat.n;
+    return {i:"EXP",amt,cat,desc:desc.slice(0,35)};
+  }
+  if(INC.test(t)){
+    const amt=getAmt(raw); const cat=getCat(t);
+    const INC_WORDS=["получил[а]?","заработал[а]?","зарплата","пришло","поступил","перевод","фриланс","начислил","от\\b","за\\b"];
+    const desc=cleanDesc(raw,INC_WORDS)||cat.n;
+    return {i:"INC",amt,cat,desc:desc.slice(0,35)};
+  }
+
+  // Есть число но нет ключевых слов — просим уточнить
+  const amt=getAmt(raw);
+  if(amt) return {i:"CLARIFY",amt,raw};
+
   return {i:"?",raw};
 }
 function run(intent,txs,budgets,goals){
@@ -154,7 +239,9 @@ function run(intent,txs,budgets,goals){
       return{text:`💡 **Совет**\nГлавная статья: ${top?top[0]:"нет данных"}\n\nПравило 50/30/20:\n• 50% — нужды\n• 30% — желания\n• 20% — накопления\n\nСоздайте лимит на эту категорию во вкладке «Бюджет».`};
     }
     case"HELP": return{text:`👋 Что я умею:\n\n🎤 Голос: «Потратил 45 на еду»\n⌨️ Текст любой командой\n📷 Фото чека — распознаю сумму\n📊 CSV выписка — импортирую\n\n✏️ Исправить ошибку:\n«Удали последнюю»\n«Исправь последнюю: потратил 25 в Пени»\nили в Истории кнопка «изменить»\n\n❓ Спросите:\n«Какой баланс?»\n«Прогноз на месяц»\n«Совет по экономии»`};
-    default: return{text:`Не понял 🤔 Попробуйте:\n«Потратил 20 на кофе»\n«Получил 3200»\n«Какой баланс?»\n«Прогноз на месяц»`};
+    default:
+      if(intent.i==="CLARIFY") return {text:`Вижу сумму **${fmt2(intent.amt)}** — это расход или доход?\n\nСкажите точнее:\n«Потратил ${fmt2(intent.amt)} на...»\n«Получил ${fmt2(intent.amt)}»`};
+      return{text:`Не понял 🤔 Попробуйте:\n«Потратил 20 на кофе»\n«Получил зарплату 1700»\n«Какой баланс?»\n«Прогноз на месяц»`};
   }
 }
 
@@ -1219,6 +1306,10 @@ export default function App(){
     if(TG.isInsideTelegram && !state.settings.onboarded && TG.firstName){
       dispatch({type:"SET_SETTINGS",patch:{name:TG.firstName,onboarded:true}});
     }
+    // Заранее запрашиваем разрешение на микрофон — один раз за сессию.
+    // Делаем с небольшой задержкой чтобы не пугать пользователя сразу.
+    const micTimer = setTimeout(() => { Voice.prewarm(); }, 3000);
+    return () => clearTimeout(micTimer);
   },[]);
 
   // онбординг
